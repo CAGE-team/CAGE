@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CAGE — Live Attack Graph</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0e1a;--bg2:#0f1524;--bg3:#141929;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.12);
+  --text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;
+  --blue:#3b82f6;--teal:#14b8a6;--amber:#f59e0b;
+  --red:#ef4444;--green:#22c55e;--purple:#a855f7;
+}
+body{background:var(--bg);color:var(--text);font-family:'SF Mono','Fira Code',monospace;font-size:13px;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0}
+.logo{display:flex;align-items:center;gap:10px}
+.logo-box{width:26px;height:26px;background:linear-gradient(135deg,var(--blue),var(--purple));border-radius:5px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px}
+.logo-title{font-size:14px;font-weight:600;letter-spacing:.05em}
+.logo-sub{font-size:9px;color:var(--text3);letter-spacing:.08em;text-transform:uppercase}
+.hdr-right{display:flex;align-items:center;gap:16px;font-size:11px;color:var(--text2)}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px;animation:blink 2s infinite}
+.dot.green{background:var(--green)}.dot.red{background:var(--red)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+#clock{color:var(--text3);font-size:11px}
+#chain-banner{display:none;padding:9px 20px;background:rgba(239,68,68,.07);border-bottom:1px solid rgba(239,68,68,.25);align-items:center;gap:10px;font-size:11px;color:var(--red);flex-shrink:0}
+#chain-banner.show{display:flex}
+.chain-step{padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600}
+.cs-t1021{background:rgba(168,85,247,.15);color:var(--purple);border:1px solid rgba(168,85,247,.3)}
+.cs-t1059{background:rgba(234,179,8,.15);color:var(--amber);border:1px solid rgba(234,179,8,.3)}
+.cs-t1552{background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3)}
+.chain-arrow{color:var(--text3)}
+#chain-pod{font-size:11px;color:rgba(239,68,68,.8);margin-left:auto}
+#chain-ts{font-size:10px;color:var(--text3);margin-left:8px}
+.metrics{display:flex;gap:1px;background:var(--border);border-bottom:1px solid var(--border);flex-shrink:0}
+.metric{flex:1;padding:10px 16px;background:var(--bg2);display:flex;align-items:center;gap:10px}
+.mv{font-size:22px;font-weight:700;line-height:1;font-family:monospace}
+.mv.crit{color:var(--red)}.mv.high{color:var(--amber)}.mv.med{color:#eab308}.mv.ok{color:var(--green)}.mv.blue{color:var(--blue)}
+.ml{font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em}
+.md{font-size:9px;color:var(--text3);margin-top:2px}
+.main{display:grid;grid-template-columns:240px 1fr 300px;flex:1;min-height:0;overflow:hidden}
+.left{border-right:1px solid var(--border);overflow-y:auto;background:var(--bg2)}
+.ph{padding:10px 14px;border-bottom:1px solid var(--border);font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+.ph span{color:var(--text2);font-size:10px;text-transform:none;letter-spacing:0}
+.pod-item{padding:9px 14px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:8px;cursor:pointer;transition:background .1s;border-left:2px solid transparent}
+.pod-item:hover{background:var(--bg3)}
+.pod-item.sev-critical{border-left-color:var(--red)}
+.pod-item.sev-high{border-left-color:var(--amber)}
+.pod-item.sev-medium{border-left-color:#eab308}
+.pi-icon{width:26px;height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px}
+.pi-info{flex:1;min-width:0}
+.pi-name{font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pi-ns{font-size:9px;color:var(--text3);margin-top:1px}
+.pi-uid{font-size:8px;color:var(--text3);margin-top:2px;opacity:.6}
+.pi-badges{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.badge{font-size:8px;padding:1px 4px;border-radius:2px;font-weight:600}
+.badge.crit{background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3)}
+.badge.high{background:rgba(249,115,22,.15);color:#f97316;border:1px solid rgba(249,115,22,.3)}
+.badge.med{background:rgba(234,179,8,.15);color:#eab308;border:1px solid rgba(234,179,8,.3)}
+.badge.ok{background:rgba(34,197,94,.1);color:var(--green);border:1px solid rgba(34,197,94,.2)}
+.badge.info{background:rgba(59,130,246,.1);color:var(--blue);border:1px solid rgba(59,130,246,.2)}
+.center{display:flex;flex-direction:column;overflow:hidden;position:relative}
+.graph-scroll{position:absolute;inset:0;overflow:auto}
+.graph-scroll::-webkit-scrollbar{width:10px;height:10px}
+.graph-scroll::-webkit-scrollbar-track{background:var(--bg2)}
+.graph-scroll::-webkit-scrollbar-thumb{background:var(--border2);border-radius:5px}
+.graph-scroll::-webkit-scrollbar-thumb:hover{background:var(--text3)}
+#graph-canvas{width:100%;flex:1;display:block}
+.graph-controls{position:absolute;bottom:12px;left:12px;display:flex;gap:6px}
+.gbtn{background:var(--bg2);border:1px solid var(--border2);color:var(--text2);padding:5px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-family:inherit}
+.gbtn:hover{background:var(--bg3);color:var(--text);border-color:var(--blue)}
+.legend{position:absolute;top:10px;right:10px;background:rgba(10,14,26,.88);border:1px solid var(--border2);border-radius:7px;padding:9px 12px;font-size:10px;color:var(--text2);backdrop-filter:blur(8px)}
+.li{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.li:last-child{margin:0}
+.li-dot{width:9px;height:9px;border-radius:50%}
+.li-line{width:18px;height:2px}
+.right{border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;background:var(--bg2)}
+.alert-list{overflow-y:auto;max-height:45%}
+.alert-item{padding:9px 12px;border-bottom:1px solid var(--border);border-left:2px solid transparent;animation:fadeIn .3s ease}
+.alert-item.CRITICAL{border-left-color:var(--red)}
+.alert-item.HIGH{border-left-color:var(--amber)}
+.alert-item.MEDIUM{border-left-color:#eab308}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
+.at{display:flex;align-items:center;gap:5px;margin-bottom:3px}
+.asev{font-size:8px;font-weight:700;letter-spacing:.06em;padding:1px 4px;border-radius:2px}
+.CRITICAL .asev{background:rgba(239,68,68,.15);color:var(--red)}
+.HIGH .asev{background:rgba(249,115,22,.15);color:#f97316}
+.MEDIUM .asev{background:rgba(234,179,8,.15);color:#eab308}
+.arule{font-size:11px;font-weight:600;flex:1}
+.atime{font-size:9px;color:var(--text3)}
+.adesc{font-size:10px;color:var(--text2);margin-bottom:3px;line-height:1.4}
+.ameta{display:flex;gap:5px;flex-wrap:wrap}
+.atag{font-size:8px;color:var(--text3);background:rgba(255,255,255,.04);border:1px solid var(--border);padding:1px 4px;border-radius:2px}
+.evt-stream{flex:1;overflow-y:auto}
+.evt{padding:5px 12px;border-bottom:1px solid rgba(255,255,255,.03);display:flex;gap:7px;font-size:10px;line-height:1.4}
+.et{color:var(--text3);flex-shrink:0;width:52px}
+.ek{flex-shrink:0;width:60px}
+.ek.process_exec{color:#eab308}.ek.k8s_secret_access{color:var(--teal)}.ek.pod_exec{color:var(--purple)}
+.eb{color:var(--text2);flex:1;min-width:0;word-break:break-all}
+.ep{color:var(--blue)}.ebn{color:var(--text)}
+::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:2px}
+#conn-status{font-size:10px;color:var(--text3)}
+#conn-status.live{color:var(--green)}
+#conn-status.dead{color:var(--red)}
+#tt{position:fixed;background:var(--bg2);border:1px solid var(--border2);border-radius:7px;padding:10px 13px;font-size:10px;pointer-events:none;z-index:1000;max-width:240px;display:none;box-shadow:0 8px 28px rgba(0,0,0,.5)}
+#tt.show{display:block}
+.tt-title{font-weight:600;font-size:11px;margin-bottom:5px}
+.tt-row{color:var(--text2);margin-bottom:2px}
+.tt-row span{color:var(--text3)}
+.spark-wrap{padding:8px 16px 6px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0}
+.spark-hd{display:flex;justify-content:space-between;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+#spark-canvas{width:100%;height:34px;display:block}
+.chain-hist{max-height:130px;overflow-y:auto;border-bottom:1px solid var(--border);flex-shrink:0}
+.chain-hist-empty{padding:14px 12px;font-size:10px;color:var(--text3);text-align:center}
+.ch-item{padding:7px 12px;border-bottom:1px solid rgba(255,255,255,.03);font-size:9px}
+.ch-steps{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:3px}
+.ch-step{padding:1px 5px;border-radius:3px;font-weight:700;font-size:9px}
+.ch-arrow{color:var(--text3);font-size:9px}
+.ch-meta{display:flex;justify-content:space-between;color:var(--text3);font-size:8px}
+.ch-pod{color:var(--text2)}
+.pod-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-right:4px;display:inline-block}
+.pod-item.expanded{background:var(--bg3)}
+.pod-expand{padding:8px 14px 10px 14px;background:rgba(255,255,255,.02);border-bottom:1px solid var(--border);font-size:9px;color:var(--text2)}
+.pe-row{display:flex;justify-content:space-between;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid rgba(255,255,255,.04)}
+.pe-row:last-child{border:0;margin:0;padding:0}
+.pe-label{color:var(--text3);text-transform:uppercase;letter-spacing:.05em;font-size:8px}
+.pe-val{color:var(--text);text-align:right;max-width:60%}
+.pe-techs{display:flex;flex-wrap:wrap;gap:3px;justify-content:flex-end}
+.pe-tech{background:rgba(255,255,255,.05);border:1px solid var(--border2);padding:1px 4px;border-radius:2px;font-size:8px;color:var(--text2)}
+.sort-toggle{display:flex;gap:2px;background:rgba(255,255,255,.03);border-radius:4px;padding:2px}
+.sort-btn{font-size:9px;padding:2px 7px;border-radius:3px;cursor:pointer;color:var(--text3);transition:all .12s;text-transform:none;letter-spacing:0}
+.sort-btn:hover{color:var(--text2)}
+.navbar{display:flex;gap:2px;padding:0 16px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0}
+.navtab{padding:10px 16px;font-size:11px;font-weight:600;letter-spacing:.03em;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
+.navtab:hover{color:var(--text2)}
+.navtab.active{color:var(--text);border-bottom-color:#6366f1}
+.page{display:flex;flex-direction:column;flex:1;min-height:0}
+
+.killchain-wrap{padding:10px 16px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0}
+.kc-hd{display:flex;justify-content:space-between;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}
+.kc-hd select{background:var(--bg3);color:var(--text2);border:1px solid var(--border2);border-radius:4px;font-size:10px;padding:2px 6px}
+.kc-steps{display:flex;align-items:center}
+.kc-step{display:flex;flex-direction:column;align-items:center;gap:5px;flex:1;position:relative}
+.kc-node{width:28px;height:28px;border-radius:50%;border:2px solid var(--border2);background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text3);transition:all .2s;z-index:1}
+.kc-step.hit .kc-node{border-color:#ef4444;background:#ef444422;color:#ef4444;box-shadow:0 0 12px #ef444455}
+.kc-label{font-size:9px;color:var(--text3);text-align:center;max-width:80px}
+.kc-step.hit .kc-label{color:var(--text2)}
+.kc-line{position:absolute;top:14px;left:50%;width:100%;height:2px;background:var(--border2);z-index:0}
+.kc-step.hit .kc-line{background:#ef4444}
+.kc-step:last-child .kc-line{display:none}
+.kc-count{font-size:8px;color:#ef4444;font-weight:700;margin-top:-2px}
+
+.matrix-wrap{flex:1;overflow:auto;padding:20px}
+.matrix-intro{font-size:11px;color:var(--text2);margin-bottom:16px;max-width:800px;line-height:1.6}
+.matrix-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;max-width:1400px}
+.matrix-col-hd{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;padding:6px 4px;border-bottom:1px solid var(--border2);margin-bottom:4px}
+.matrix-cell{background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:10px;min-height:70px;display:flex;flex-direction:column;justify-content:space-between;transition:all .2s}
+.matrix-cell.hit{border-color:#ef4444;background:linear-gradient(135deg,#ef444418,#ef444405)}
+.matrix-cell.hit-med{border-color:#eab308;background:linear-gradient(135deg,#eab30818,#eab30805)}
+.matrix-cell-id{font-size:10px;font-weight:700;font-family:'SF Mono',monospace;color:var(--text2)}
+.matrix-cell.hit .matrix-cell-id{color:#ef4444}
+.matrix-cell.hit-med .matrix-cell-id{color:#eab308}
+.matrix-cell-name{font-size:9px;color:var(--text3);margin-top:2px;line-height:1.3}
+.matrix-cell-count{font-size:16px;font-weight:700;color:var(--text3);align-self:flex-end}
+.matrix-cell.hit .matrix-cell-count{color:#ef4444}
+.matrix-cell.hit-med .matrix-cell-count{color:#eab308}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <div class="logo">
+    <div class="logo-box">⬡</div>
+    <div>
+      <div class="logo-title">CAGE</div>
+      <div class="logo-sub">Cross-layer Attack Graph Engine</div>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <span><span class="dot green"></span>Tetragon eBPF</span>
+    <span><span class="dot green"></span>K8s Audit Log</span>
+    <span id="conn-status">connecting…</span>
+    <span id="clock"></span>
+  </div>
+</div>
+<div class="navbar">
+  <div class="navtab active" id="navtab-live" onclick="switchPage('live')">Live View</div>
+  <div class="navtab" id="navtab-matrix" onclick="switchPage('matrix')">MITRE Matrix</div>
+</div>
+<div id="page-live" class="page">
+<div id="chain-banner">
+  <span style="font-weight:700;flex-shrink:0">⚠ CHAIN DETECTED</span>
+  <div style="display:flex;align-items:center;gap:6px">
+    <span class="chain-step cs-t1021">T1021 Remote Exec</span>
+    <span class="chain-arrow">→</span>
+    <span class="chain-step cs-t1059">T1059 Shell Spawn</span>
+    <span class="chain-arrow">→</span>
+    <span class="chain-step cs-t1552">T1552 Secret Access</span>
+  </div>
+  <span id="chain-pod"></span>
+  <span id="chain-ts"></span>
+</div>
+<div class="killchain-wrap">
+  <div class="kc-hd">
+    <span>Kill-Chain Progress</span>
+    <select id="kc-pod-select" onchange="renderKillChain(this.value)"></select>
+  </div>
+  <div class="kc-steps" id="kc-steps"></div>
+</div>
+<div class="metrics">
+  <div class="metric"><div class="mv crit" id="m-crit">0</div><div><div class="ml">Critical</div><div class="md">chains</div></div></div>
+  <div class="metric"><div class="mv high" id="m-high">0</div><div><div class="ml">High</div><div class="md">T1552/T1611/T1548/T1496/T1499</div></div></div>
+  <div class="metric"><div class="mv med" id="m-med">0</div><div><div class="ml">Medium</div><div class="md">T1059/T1021/T1613</div></div></div>
+  <div class="metric"><div class="mv ok" id="m-fp">0</div><div><div class="ml">False Positives</div><div class="md">precision 100%</div></div></div>
+  <div class="metric"><div class="mv blue" id="m-pods">0</div><div><div class="ml">Pods Tracked</div><div class="md" id="md-pods">live</div></div></div>
+  <div class="metric"><div class="mv blue" id="m-evts">0</div><div><div class="ml">Events/min</div><div class="md">live</div></div></div>
+</div>
+<div class="spark-wrap">
+  <div class="spark-hd"><span>Alert Volume (last 5 min)</span><span>CRITICAL / HIGH / MEDIUM</span></div>
+  <canvas id="spark-canvas"></canvas>
+</div>
+<div class="main">
+  <div class="left">
+    <div class="ph">Pod Inventory <span id="pod-count">—</span></div>
+    <div id="pod-list"></div>
+  </div>
+  <div class="center">
+    <div class="graph-scroll" id="graph-scroll">
+      <canvas id="graph-canvas"></canvas>
+    </div>
+    <div class="legend">
+      <div class="li"><div class="li-dot" style="background:#ef4444"></div>Critical pod</div>
+      <div class="li"><div class="li-dot" style="background:#f59e0b"></div>Alert pod</div>
+      <div class="li"><div class="li-dot" style="background:#22c55e"></div>Clean pod</div>
+      <div class="li"><div class="li-dot" style="background:#64748b"></div>System/External</div>
+      <div style="margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,.07)">
+        <div class="li" title="Tetragon eBPF sensor observing a shell spawn inside the pod"><div class="li-line" style="background:#eab308"></div>T1059 shell</div>
+        <div class="li" title="External admin runs kubectl exec into the pod"><div class="li-line" style="background:#a855f7"></div>T1021 exec</div>
+        <div class="li" title="Pod calls the K8s API to read a secret"><div class="li-line" style="background:#ef4444"></div>T1552 secret</div>
+        <div class="li" title="Pod opens a TCP connection to another pod"><div class="li-line" style="background:#06b6d4"></div>Network Flow</div>
+      </div>
+      <div style="margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,.07)">
+        <div class="li" title="Attacker breaks out of container isolation to reach the host"><div class="li-dot" style="background:#ef4444"></div>T1611 escape</div>
+        <div class="li" title="Attacker gains higher privileges inside a container (sudo, setcap, capabilities)"><div class="li-dot" style="background:#f97316"></div>T1548 priv-esc</div>
+        <div class="li" title="Excessive resource use — fork bomb or cryptomining"><div class="li-dot" style="background:#eab308"></div>T1496/T1499 abuse</div>
+        <div class="li" title="Attacker grants themselves excessive Kubernetes permissions (cluster-admin, wildcard roles)"><div class="li-dot" style="background:#ec4899"></div>T1548.005 RBAC</div>
+      </div>
+    </div>
+    <div class="graph-controls">
+      <button class="gbtn" onclick="resetLayout()">↺ Reset</button>
+      <button class="gbtn" id="pause-btn" onclick="togglePause()">⏸ Pause</button>
+      <button class="gbtn" onclick="zoomBy(-0.2)">−</button>
+      <button class="gbtn" id="zoom-label" onclick="resetZoom()">100%</button>
+      <button class="gbtn" onclick="zoomBy(0.2)">+</button>
+    </div>
+  </div>
+  <div class="right">
+    <div class="ph">Chain History <span id="chain-count">0 chains</span></div>
+    <div class="chain-hist" id="chain-hist"><div class="chain-hist-empty">No attack chains detected yet</div></div>
+    <div class="ph">Alert Feed <span id="alert-count">0 alerts</span></div>
+    <div class="ph" style="padding:6px 12px;border-top:0">
+      <span></span>
+      <span class="sort-toggle">
+        <span class="sort-btn active" id="sort-time-btn" onclick="setAlertSort('time')">Recent</span>
+        <span class="sort-btn" id="sort-sev-btn" onclick="setAlertSort('severity')">Severity</span>
+      </span>
+    </div>
+    <div class="alert-list" id="alert-list"></div>
+    <div class="ph">Live Event Stream <span id="evt-count">0 events</span></div>
+    <div class="evt-stream" id="evt-stream"></div>
+  </div>
+</div>
+</div>
+<div id="page-matrix" class="page" style="display:none">
+  <div class="matrix-wrap">
+    <div class="matrix-intro">
+      The MITRE ATT&CK matrix below shows every technique CAGE can detect, grouped by tactic. Cells light up
+      when that technique has fired at least once, with a running count of how many times. Use this view to
+      see coverage breadth at a glance, independent of which pod triggered it.
+    </div>
+    <div class="matrix-grid" id="matrix-grid"></div>
+  </div>
+</div>
+<div id="tt">
+  <div class="tt-title" id="tt-name"></div>
+  <div class="tt-row"><span>ns: </span><span id="tt-ns"></span></div>
+  <div class="tt-row"><span>uid: </span><span id="tt-uid"></span></div>
+  <div class="tt-row"><span>ip: </span><span id="tt-ip"></span></div>
+  <div class="tt-row"><span>alerts: </span><span id="tt-alerts"></span></div>
+</div>
+<script>
+const BASE = 'http://localhost:5000';
+setInterval(() => { document.getElementById('clock').textContent = new Date().toTimeString().slice(0,8); }, 1000);
+
+let gNodes=[], gEdges=[], alerts=[], evtCount=0, evtMinBucket=0, animPaused=false, selPod=null;
+let nodePositions={}, dragging=null, dragOff={x:0,y:0}, animFrame;
+let chainHistory=[], expandedPod=null;
+const podColorMap={};
+const POD_PALETTE=['#38bdf8','#f472b6','#a3e635','#fb923c','#c084fc','#2dd4bf','#facc15','#818cf8'];
+let podColorIdx=0;
+function podColor(key){
+  if(!podColorMap[key]){podColorMap[key]=POD_PALETTE[podColorIdx%POD_PALETTE.length];podColorIdx++;}
+  return podColorMap[key];
+}
+
+const MITRE_DESC={
+  'T1059':'Execution: a shell process spawned inside a container',
+  'T1021':'Remote exec: someone ran kubectl exec into this pod',
+  'T1552':'Credential Access: a Kubernetes secret was read via the API',
+  'T1610':'Network Flow: this pod opened a TCP connection to another pod',
+  'T1611':'Escape to Host: container-escape tooling or host-runtime paths were used inside the container',
+  'T1548':'Privilege Escalation: sudo/su/setcap used inside the container',
+  'T1548-PRIV-POD':'Privilege Escalation: a pod was deployed with privileged/host-namespace settings',
+  'T1548.005':'RBAC Abuse: a Role/ClusterRoleBinding grants excessive Kubernetes permissions',
+  'T1496':'Resource Hijacking: cryptomining process signature detected',
+  'T1499':'Endpoint DoS: fork-bomb-like burst of process executions',
+  'T1613':'Discovery: a burst of RBAC object reads (role/binding enumeration)',
+};
+function ruleTitle(rule){
+  if(!rule) return '';
+  if(rule.includes('->')){
+    return rule.split('->').map(r=>`${r}: ${MITRE_DESC[r]||'chained technique'}`).join('\n');
+  }
+  return MITRE_DESC[rule]||'';
+}
+
+// Fixed layout positions - percentages of canvas size
+const FIXED_LAYOUT = {
+  'admin':        {xp:0.10, yp:0.50, role:'external'},
+  'attacker':     {xp:0.42, yp:0.50, role:'attacker'},
+  'kube-api':     {xp:0.75, yp:0.50, role:'target'},
+  'tetragon':     {xp:0.42, yp:0.18, role:'sensor'},
+  'host':         {xp:0.42, yp:0.84, role:'target'},
+  // Push all system/noise pods to bottom-right quadrant cluster
+  'coredns-1':    {xp:0.82, yp:0.72, role:'system'},
+  'coredns-2':    {xp:0.90, yp:0.80, role:'system'},
+  'etcd':         {xp:0.88, yp:0.65, role:'system'},
+  'kindnet':      {xp:0.96, yp:0.72, role:'system'},
+  'kube-ctrl':    {xp:0.82, yp:0.88, role:'system'},
+  'kube-proxy':   {xp:0.90, yp:0.58, role:'system'},
+  'kube-sched':   {xp:0.96, yp:0.85, role:'system'},
+  'tet-op':       {xp:0.88, yp:0.92, role:'system'},
+  'local-path':   {xp:0.96, yp:0.92, role:'system'},
+  // Legitimate-app and password-analyzers bottom-left
+  'legit-app':    {xp:0.25, yp:0.80, role:'clean'},
+  'pw-ana-1':     {xp:0.10, yp:0.72, role:'clean'},
+  'pw-ana-2':     {xp:0.10, yp:0.85, role:'clean'},
+};
+
+const canvas = document.getElementById('graph-canvas');
+const ctx = canvas.getContext('2d');
+
+const MIN_GRAPH_W=1500, MIN_GRAPH_H=900;
+function resize(){
+  const wrap=document.getElementById('graph-scroll');
+  const w=Math.max(wrap.clientWidth, MIN_GRAPH_W);
+  const h=Math.max(wrap.clientHeight, MIN_GRAPH_H);
+  canvas.width=w; canvas.height=h;
+  canvas.style.width=w+'px'; canvas.style.height=h+'px';
+}
+window.addEventListener('resize',()=>{resize();applyFixedLayout();});
+resize();
+
+// ── Graph-only zoom (CSS transform on the canvas; rest of the UI is unaffected) ──
+let graphZoom=1;
+const ZOOM_MIN=0.4, ZOOM_MAX=2.5;
+function applyZoom(){
+  canvas.style.transformOrigin='0 0';
+  canvas.style.transform=`scale(${graphZoom})`;
+  document.getElementById('zoom-label').textContent=Math.round(graphZoom*100)+'%';
+}
+function zoomBy(delta){ setZoom(graphZoom+delta); }
+function resetZoom(){ setZoom(1); }
+function setZoom(z){
+  graphZoom=Math.min(ZOOM_MAX,Math.max(ZOOM_MIN,z));
+  applyZoom();
+}
+document.getElementById('graph-scroll').addEventListener('wheel',e=>{
+  e.preventDefault();
+  const wrap=document.getElementById('graph-scroll');
+  // keep the point under the cursor stable while zooming
+  const r=wrap.getBoundingClientRect();
+  const beforeX=(e.clientX-r.left+wrap.scrollLeft)/graphZoom;
+  const beforeY=(e.clientY-r.top+wrap.scrollTop)/graphZoom;
+  setZoom(graphZoom + (e.deltaY<0?0.1:-0.1));
+  wrap.scrollLeft=beforeX*graphZoom-(e.clientX-r.left);
+  wrap.scrollTop=beforeY*graphZoom-(e.clientY-r.top);
+},{passive:false});
+applyZoom();
+
+function getFixedKey(node){
+  if(node.uid==='admin') return 'admin';
+  if(node.uid==='host') return 'host';
+  if(node.name==='attacker') return 'attacker';
+  if(node.name&&node.name.startsWith('kube-apiserver-')) return 'kube-api';
+  if(node.name&&node.name.startsWith('tetragon-')&&!node.name.startsWith('tetragon-operator')) return 'tetragon';
+  if(node.name&&node.name.startsWith('coredns-')&&node.name.endsWith('rdz7p')) return 'coredns-1';
+  if(node.name&&node.name.startsWith('coredns-')&&node.name.endsWith('z2qn7')) return 'coredns-2';
+  if(node.name&&node.name.startsWith('etcd-')) return 'etcd';
+  if(node.name&&node.name.startsWith('kindnet-')) return 'kindnet';
+  if(node.name&&node.name.startsWith('kube-controller-')) return 'kube-ctrl';
+  if(node.name&&node.name.startsWith('kube-proxy-')) return 'kube-proxy';
+  if(node.name&&node.name.startsWith('kube-scheduler-')) return 'kube-sched';
+  if(node.name&&node.name.startsWith('tetragon-operator-')) return 'tet-op';
+  if(node.name&&node.name.startsWith('local-path-')) return 'local-path';
+  if(node.name==='legitimate-app') return 'legit-app';
+  if(node.name&&node.name.endsWith('mzh6v')) return 'pw-ana-1';
+  if(node.name&&node.name.endsWith('xcv4s')) return 'pw-ana-2';
+  return null;
+}
+
+function applyFixedLayout(){
+  const W=canvas.width, H=canvas.height;
+  gNodes.forEach(n=>{
+    const key=getFixedKey(n);
+    if(key && FIXED_LAYOUT[key]){
+      nodePositions[n.uid]={x:W*FIXED_LAYOUT[key].xp, y:H*FIXED_LAYOUT[key].yp};
+    } else if(!nodePositions[n.uid]){
+      // Place non-key nodes in a circle around the edges
+      const angle=Math.random()*Math.PI*2;
+      const r=Math.min(W,H)*0.38;
+      nodePositions[n.uid]={x:W/2+Math.cos(angle)*r*(0.7+Math.random()*0.3), y:H/2+Math.sin(angle)*r*(0.7+Math.random()*0.3)};
+    }
+  });
+}
+
+function initGraph(nodes,edges){
+  gNodes=nodes; gEdges=edges;
+  applyFixedLayout();
+  if(!animFrame) animLoop(0);
+}
+
+function updateGraphData(nodes,edges){
+  gNodes=nodes; gEdges=edges;
+  applyFixedLayout();
+  populateKcPodSelect();
+}
+
+let packetT=0;
+function animLoop(ts){
+  if(!animPaused) packetT=ts;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  // Grid
+  ctx.save();ctx.strokeStyle='rgba(255,255,255,.025)';ctx.lineWidth=.5;
+  for(let x=0;x<canvas.width;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvas.height);ctx.stroke();}
+  for(let y=0;y<canvas.height;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();}
+  ctx.restore();
+  const selfLoopCounts={};
+  const selfLoopIndex=new Map();
+  gEdges.forEach(e=>{
+    if(e.from===e.to){
+      const i=selfLoopCounts[e.from]||0;
+      selfLoopIndex.set(e,i);
+      selfLoopCounts[e.from]=i+1;
+   }
+});
+gEdges.forEach(e=>drawEdge(e,packetT,selfLoopIndex.get(e)||0,selfLoopCounts[e.from]||1));
+  gNodes.forEach(n=>drawNode(n));
+  animFrame=requestAnimationFrame(animLoop);
+}
+
+function nodeRadius(n){
+  if(n.uid==='admin') return 18;
+  if(n.uid==='host') return 20;
+  if(n.uid&&n.uid.startsWith('rbac:')) return 16;
+  if(n.name==='attacker') return 26;
+  if(n.name&&n.name.startsWith('kube-apiserver')) return 22;
+  if(n.name&&n.name.startsWith('tetragon')) return 18;
+  if(n.namespace==='default') return 16;
+  return 10;
+}
+
+function nodeColor(n){
+  if(n.severity==='critical') return '#ef4444';
+  if(n.severity==='high') return '#f59e0b';
+  if(n.severity==='medium') return '#eab308';
+  if(n.uid==='admin') return '#a855f7';
+  if(n.uid==='host') return '#ef4444';
+  if(n.uid&&n.uid.startsWith('rbac:')) return '#ec4899';
+  if(n.name&&n.name.startsWith('tetragon')) return '#14b8a6';
+  if(n.namespace!=='default') return '#475569';
+  return '#22c55e';
+}
+
+function drawEdge(e,t,loopIdx,loopTotal){
+  const fp=nodePositions[e.from], tp=nodePositions[e.to];
+  if(!fp||!tp) return;
+  const fn=gNodes.find(n=>n.uid===e.from), tn=gNodes.find(n=>n.uid===e.to);
+  if(!fn||!tn) return;
+
+  if(e.from===e.to){
+    // Self-loop: curved arc around the node, fanned out by index so multiple
+    // self-loops on the same node (T1548 priv-esc / T1496 / T1499) don't overlap
+    const r=nodeRadius(fn);
+    const n=loopTotal||1, i=loopIdx||0;
+    const spread=Math.PI/2.2;
+    const baseAngle=-Math.PI/2 - (spread*(n-1))/2 + spread*i;
+    const dist=r+32;
+    const cx=fp.x+Math.cos(baseAngle)*dist*0.35;
+    const cy=fp.y+Math.sin(baseAngle)*dist;
+    ctx.save();
+    ctx.shadowColor=e.color||'#3b82f6'; ctx.shadowBlur=6;
+    ctx.strokeStyle=e.color||'#3b82f6'; ctx.lineWidth=2.5; ctx.globalAlpha=.85;
+    ctx.setLineDash([8,4]); ctx.lineDashOffset=-(t*0.04);
+    ctx.beginPath();
+    ctx.arc(cx,cy,20,0.15*Math.PI,0.85*Math.PI,false);
+    ctx.stroke();
+    ctx.setLineDash([]); ctx.shadowBlur=0;
+    // Arrowhead pointing back down into the node
+    const ax=fp.x-r*0.3, ay=fp.y-r-2;
+    ctx.globalAlpha=1; ctx.fillStyle=e.color||'#3b82f6';
+    ctx.beginPath();
+    ctx.moveTo(ax,ay);
+    ctx.lineTo(ax-8,ay-10);
+    ctx.lineTo(ax+8,ay-10);
+    ctx.closePath(); ctx.fill();
+    // Label
+    const label=e.type||'';
+    ctx.font='bold 10px SF Mono,monospace'; ctx.textAlign='center';
+    const tw=ctx.measureText(label).width;
+    ctx.globalAlpha=.9; ctx.fillStyle='rgba(10,14,26,.85)';
+    ctx.fillRect(cx-tw/2-5,cy-30,tw+10,16);
+    ctx.strokeStyle=e.color||'#3b82f6'; ctx.lineWidth=1;
+    ctx.strokeRect(cx-tw/2-5,cy-30,tw+10,16);
+    ctx.fillStyle=e.color||'#3b82f6'; ctx.globalAlpha=1;
+    ctx.fillText(label,cx,cy-18);
+    ctx.restore();
+    return;
+  }
+
+  const dx=tp.x-fp.x,dy=tp.y-fp.y,dist=Math.sqrt(dx*dx+dy*dy);
+  if(dist<1) return;
+  const ux=dx/dist,uy=dy/dist;
+  const r1=nodeRadius(fn)+3,r2=nodeRadius(tn)+5;
+  const sx=fp.x+ux*r1,sy=fp.y+uy*r1;
+  const ex=tp.x-ux*r2,ey=tp.y-uy*r2;
+
+  ctx.save();
+  // Glow effect on edge
+  ctx.shadowColor=e.color||'#3b82f6';
+  ctx.shadowBlur=6;
+  ctx.strokeStyle=e.color||'#3b82f6';
+  ctx.lineWidth=2.5;
+  ctx.globalAlpha=.85;
+  ctx.setLineDash([8,4]);
+  ctx.lineDashOffset=-(t*0.04);
+  ctx.beginPath();ctx.moveTo(sx,sy);ctx.lineTo(ex,ey);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.shadowBlur=0;
+
+  // Arrowhead
+  const angle=Math.atan2(ey-sy,ex-sx);
+  ctx.globalAlpha=1;
+  ctx.fillStyle=e.color||'#3b82f6';
+  ctx.beginPath();
+  ctx.moveTo(ex,ey);
+  ctx.lineTo(ex-12*Math.cos(angle-.4),ey-12*Math.sin(angle-.4));
+  ctx.lineTo(ex-12*Math.cos(angle+.4),ey-12*Math.sin(angle+.4));
+  ctx.closePath();ctx.fill();
+
+  // Edge label with background
+  const mx=(sx+ex)/2,my=(sy+ey)/2;
+  const nx=-uy,ny=ux;
+  const lx=mx+nx*16,ly=my+ny*16;
+  const label=e.type||'';
+  ctx.font='bold 10px SF Mono,monospace';
+  ctx.textAlign='center';
+  const tw=ctx.measureText(label).width;
+  ctx.globalAlpha=.9;
+  ctx.fillStyle='rgba(10,14,26,.85)';
+  ctx.fillRect(lx-tw/2-5,ly-8,tw+10,16);
+  ctx.strokeStyle=e.color||'#3b82f6';
+  ctx.lineWidth=1;
+  ctx.strokeRect(lx-tw/2-5,ly-8,tw+10,16);
+  ctx.fillStyle=e.color||'#3b82f6';
+  ctx.globalAlpha=1;
+  ctx.fillText(label,lx,ly+3);
+
+  // Animated packet
+  const progress=((t*0.0005)%1);
+  const px=fp.x+(tp.x-fp.x)*progress;
+  const py=fp.y+(tp.y-fp.y)*progress;
+  ctx.globalAlpha=.95;
+  ctx.shadowColor=e.color||'#3b82f6';
+  ctx.shadowBlur=8;
+  ctx.fillStyle=e.color||'#3b82f6';
+  ctx.beginPath();ctx.arc(px,py,4,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.restore();
+}
+
+function drawNode(n){
+  const pos=nodePositions[n.uid];
+  if(!pos) return;
+  const {x,y}=pos;
+  const r=nodeRadius(n);
+  const color=nodeColor(n);
+  const isSel=selPod===n.uid;
+  ctx.save();
+
+  // Critical glow
+  if(n.severity==='critical'){
+    const glow=ctx.createRadialGradient(x,y,r,x,y,r+24);
+    glow.addColorStop(0,'rgba(239,68,68,.25)');
+    glow.addColorStop(1,'rgba(239,68,68,0)');
+    ctx.beginPath();ctx.arc(x,y,r+24,0,Math.PI*2);
+    ctx.fillStyle=glow;ctx.fill();
+  }
+
+  // Admin node: diamond shape
+  if(n.uid==='admin'){
+    ctx.globalAlpha=1;
+    ctx.fillStyle=color+'20';
+    ctx.strokeStyle=color;ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(x,y-r);ctx.lineTo(x+r,y);ctx.lineTo(x,y+r);ctx.lineTo(x-r,y);
+    ctx.closePath();ctx.fill();ctx.stroke();
+    ctx.fillStyle=color;
+    ctx.beginPath();ctx.arc(x,y,r*.3,0,Math.PI*2);ctx.fill();
+  } else {
+    if(isSel){
+      ctx.beginPath();ctx.arc(x,y,r+6,0,Math.PI*2);
+      ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.globalAlpha=.25;ctx.stroke();
+    }
+    ctx.globalAlpha=1;
+    ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);
+    ctx.fillStyle=color+'22';ctx.fill();
+    ctx.strokeStyle=color;ctx.lineWidth=2;ctx.stroke();
+    ctx.beginPath();ctx.arc(x,y,r*.38,0,Math.PI*2);
+    ctx.fillStyle=color;ctx.fill();
+  }
+
+  // Label
+  const label=n.name.length>16?n.name.slice(0,15)+'…':n.name;
+  ctx.fillStyle='#e2e8f0';ctx.font='500 10px SF Mono,monospace';
+  ctx.textAlign='center';ctx.globalAlpha=1;
+  ctx.fillText(label,x,y+r+14);
+  ctx.fillStyle='#64748b';ctx.font='8px SF Mono,monospace';
+  const ns=n.namespace==='external'?'[external]':n.namespace;
+  ctx.fillText(ns,x,y+r+24);
+
+  // Alert count badge
+  if(n.alert_count>0){
+    ctx.fillStyle=color;ctx.font='bold 9px monospace';
+    ctx.fillText(`${n.alert_count} alerts`,x,y+r+34);
+  }
+  ctx.restore();
+}
+
+// Mouse events
+canvas.addEventListener('mousedown',e=>{
+  const {mx,my}=cm(e);
+  gNodes.forEach(n=>{
+    const pos=nodePositions[n.uid];if(!pos)return;
+    const dx=mx-pos.x,dy=my-pos.y;
+    if(Math.sqrt(dx*dx+dy*dy)<nodeRadius(n)+6){dragging=n.uid;dragOff={x:dx,y:dy};}
+  });
+});
+canvas.addEventListener('mousemove',e=>{
+  const {mx,my}=cm(e);
+  if(dragging){nodePositions[dragging]={x:mx-dragOff.x,y:my-dragOff.y};}
+  let hit=null;
+  gNodes.forEach(n=>{
+    const pos=nodePositions[n.uid];if(!pos)return;
+    const dx=mx-pos.x,dy=my-pos.y;
+    if(Math.sqrt(dx*dx+dy*dy)<nodeRadius(n)+6) hit=n;
+  });
+  const tt=document.getElementById('tt');
+  if(hit){
+    tt.className='show';tt.style.left=(e.clientX+14)+'px';tt.style.top=(e.clientY-10)+'px';
+    document.getElementById('tt-name').textContent=hit.name;
+    document.getElementById('tt-ns').textContent=hit.namespace;
+    document.getElementById('tt-uid').textContent=(hit.uid||'').slice(0,20)+'…';
+    document.getElementById('tt-ip').textContent=hit.ip||'—';
+    document.getElementById('tt-alerts').textContent=hit.alert_count||'0';
+  } else {tt.className='';}
+});
+canvas.addEventListener('mouseup',()=>{dragging=null;});
+canvas.addEventListener('click',e=>{
+  const {mx,my}=cm(e);
+  gNodes.forEach(n=>{
+    const pos=nodePositions[n.uid];if(!pos)return;
+    const dx=mx-pos.x,dy=my-pos.y;
+    if(Math.sqrt(dx*dx+dy*dy)<nodeRadius(n)+6) selPod=n.uid;
+  });
+});
+function cm(e){const r=canvas.getBoundingClientRect();return{mx:(e.clientX-r.left)*(canvas.width/r.width),my:(e.clientY-r.top)*(canvas.height/r.height)};}
+function resetLayout(){nodePositions={};applyFixedLayout();}
+function togglePause(){animPaused=!animPaused;document.getElementById('pause-btn').textContent=animPaused?'▶ Resume':'⏸ Pause';}
+
+// Data fetching
+async function fetchAll(){
+  try{
+    const [pR,aR,sR,gR]=await Promise.all([
+      fetch(BASE+'/api/pods'),fetch(BASE+'/api/alerts'),
+      fetch(BASE+'/api/stats'),fetch(BASE+'/api/graph'),
+    ]);
+    alerts=await aR.json();
+    const stats=await sR.json();
+    const graph=await gR.json();
+    updateMetrics(stats);
+    renderPodList(graph.nodes);
+    initGraph(graph.nodes,graph.edges);
+    populateKcPodSelect();
+    renderAlerts(sortedAlertsView());
+    chainHistory=alerts.filter(a=>a.severity==='CRITICAL'&&a.rule&&a.rule.includes('->'))
+      .slice().reverse().slice(0,25)
+      .map(a=>({rule:a.rule,pod:`${a.namespace}/${a.pod_name}`,
+        ts:a.timestamp?new Date(a.timestamp).toTimeString().slice(0,8):'—',desc:a.description||''}));
+    renderChainHistory();
+    alerts.forEach(a=>{const b=sparkData[SPARK_BUCKETS-1];if(a.severity)b[a.severity]=(b[a.severity]||0);});
+    drawSpark();
+    document.getElementById('conn-status').textContent='LIVE';
+    document.getElementById('conn-status').className='live';
+  }catch(e){
+    document.getElementById('conn-status').textContent='disconnected';
+    document.getElementById('conn-status').className='dead';
+    setTimeout(fetchAll,3000);
+  }
+}
+
+function connectAlertStream(){
+  const es=new EventSource(BASE+'/stream/alerts');
+  es.onmessage=e=>{
+    const msg=JSON.parse(e.data);if(msg.type!=='alert')return;
+    const alert=msg.data;alerts.unshift(alert);prependAlert(alert);
+    if(alert.severity==='CRITICAL'&&alert.rule.includes('->')){
+      document.getElementById('chain-banner').classList.add('show');
+      document.getElementById('chain-pod').textContent=`${alert.namespace}/${alert.pod_name}`;
+      document.getElementById('chain-ts').textContent=new Date().toTimeString().slice(0,8);
+      chainHistory.unshift({rule:alert.rule,pod:`${alert.namespace}/${alert.pod_name}`,
+        ts:alert.timestamp?new Date(alert.timestamp).toTimeString().slice(0,8):new Date().toTimeString().slice(0,8),
+        desc:alert.description||''});
+      if(chainHistory.length>25) chainHistory.pop();
+      renderChainHistory();
+    }
+    sparkAdd(alert.severity);
+    fetchStats();fetchGraph();
+    if(currentPage==='matrix') renderMitreMatrix();
+    renderKillChain(document.getElementById('kc-pod-select').value||'attacker');
+    document.getElementById('conn-status').textContent='LIVE';
+    document.getElementById('conn-status').className='live';
+  };
+  es.onerror=()=>{setTimeout(connectAlertStream,3000);es.close();};
+}
+
+function connectEventStream(){
+  const es=new EventSource(BASE+'/stream/events');
+  es.onmessage=e=>{
+    const msg=JSON.parse(e.data);if(msg.type!=='event')return;
+    evtCount++;evtMinBucket++;
+    document.getElementById('evt-count').textContent=evtCount+' events';
+    prependEvent(msg.data);
+  };
+  es.onerror=()=>{setTimeout(connectEventStream,3000);es.close();};
+}
+
+function updateMetrics(stats){
+  document.getElementById('m-crit').textContent=stats.by_severity?.CRITICAL||0;
+  document.getElementById('m-high').textContent=stats.by_severity?.HIGH||0;
+  document.getElementById('m-med').textContent=stats.by_severity?.MEDIUM||0;
+  document.getElementById('m-pods').textContent=stats.pods_tracked||0;
+  document.getElementById('pod-count').textContent=(stats.pods_tracked||0)+' pods';
+}
+
+async function fetchStats(){
+  try{const r=await fetch(BASE+'/api/stats');updateMetrics(await r.json());
+  document.getElementById('alert-count').textContent=alerts.length+' alerts';}catch(e){}
+}
+
+async function fetchGraph(){
+  try{const r=await fetch(BASE+'/api/graph');const g=await r.json();
+  updateGraphData(g.nodes,g.edges);renderPodList(g.nodes);}catch(e){}
+}
+
+const SEV_COLORS={critical:'#ef4444',high:'#f59e0b',medium:'#eab308',clean:'#22c55e'};
+const SYSTEM_NS=new Set(['kube-system','local-path-storage','kube-node-lease']);
+
+function podInitials(name){return name.replace(/-[a-z0-9]{5,}$/,'').slice(0,2).toUpperCase();}
+
+function chainStepClass(step){
+  if(step==='T1021') return 'cs-t1021';
+  if(step==='T1059') return 'cs-t1059';
+  if(step==='T1552') return 'cs-t1552';
+  if(step==='T1611') return 'cs-t1552';
+  if(step==='T1548') return 'cs-t1021';
+  return 'cs-t1059';
+}
+function renderChainHistory(){
+  const el=document.getElementById('chain-hist');
+  document.getElementById('chain-count').textContent=chainHistory.length+' chains';
+  if(chainHistory.length===0){el.innerHTML='<div class="chain-hist-empty">No attack chains detected yet</div>';return;}
+  el.innerHTML='';
+  chainHistory.forEach(c=>{
+    const steps=c.rule.split('->');
+    const dotColor=podColor(c.pod);
+    const div=document.createElement('div');div.className='ch-item';
+    div.innerHTML=`
+      <div class="ch-steps">${steps.map((s,i)=>
+        `<span class="chain-step ${chainStepClass(s)}" title="${MITRE_DESC[s]||''}">${s}</span>${i<steps.length-1?'<span class="ch-arrow">→</span>':''}`
+      ).join('')}</div>
+      <div class="ch-meta"><span class="ch-pod"><span class="pod-dot" style="background:${dotColor}"></span>${c.pod}</span><span>${c.ts}</span></div>`;
+    el.appendChild(div);
+  });
+}
+
+// Sparkline: rolling 5-minute window, 10s buckets
+const SPARK_BUCKET_MS=10000, SPARK_BUCKETS=30;
+let sparkData=Array.from({length:SPARK_BUCKETS},()=>({CRITICAL:0,HIGH:0,MEDIUM:0}));
+function sparkAdd(sev){
+  if(!sparkData[SPARK_BUCKETS-1][sev]&&sparkData[SPARK_BUCKETS-1][sev]!==0) return;
+  sparkData[SPARK_BUCKETS-1][sev]=(sparkData[SPARK_BUCKETS-1][sev]||0)+1;
+  drawSpark();
+}
+function sparkTick(){
+  sparkData.shift();
+  sparkData.push({CRITICAL:0,HIGH:0,MEDIUM:0});
+  drawSpark();
+}
+const sparkCanvas=document.getElementById('spark-canvas');
+const sparkCtx=sparkCanvas.getContext('2d');
+function drawSpark(){
+  const W=sparkCanvas.offsetWidth,H=34;
+  sparkCanvas.width=W;sparkCanvas.height=H;
+  sparkCtx.clearRect(0,0,W,H);
+  const barW=W/SPARK_BUCKETS;
+  const maxTotal=Math.max(1,...sparkData.map(b=>b.CRITICAL+b.HIGH+b.MEDIUM));
+  sparkData.forEach((b,i)=>{
+    const x=i*barW+1;
+    let y=H;
+    const segs=[['CRITICAL','#ef4444'],['HIGH','#f59e0b'],['MEDIUM','#eab308']];
+    segs.forEach(([key,color])=>{
+      const v=b[key]||0;
+      if(v===0) return;
+      const h=(v/maxTotal)*(H-2);
+      sparkCtx.fillStyle=color;
+      sparkCtx.globalAlpha=.85;
+      sparkCtx.fillRect(x,y-h,barW-2,h);
+      y-=h;
+    });
+  });
+}
+setInterval(sparkTick,SPARK_BUCKET_MS);
+window.addEventListener('resize',drawSpark);
+
+function renderChainHistory_init(){renderChainHistory();drawSpark();}
+renderChainHistory_init();
+
+function podStats(node){
+  const match=alerts.filter(a=>a.namespace===node.namespace&&a.pod_name===node.name);
+  const sorted=match.slice().sort((a,b)=>new Date(a.timestamp||0)-new Date(b.timestamp||0));
+  const first=sorted[0], last=sorted[sorted.length-1];
+  const techSet=new Set(sorted.map(a=>a.rule).filter(Boolean));
+  return {count:sorted.length, first, last, techs:[...techSet]};
+}
+
+// ── Multi-page navigation ──
+let currentPage='live';
+function switchPage(name){
+  currentPage=name;
+  document.getElementById('page-live').style.display=name==='live'?'flex':'none';
+  document.getElementById('page-matrix').style.display=name==='matrix'?'flex':'none';
+  document.getElementById('navtab-live').classList.toggle('active',name==='live');
+  document.getElementById('navtab-matrix').classList.toggle('active',name==='matrix');
+  if(name==='matrix') renderMitreMatrix();
+}
+
+// ── Kill-chain stepper ──
+const KC_STAGES=[
+  {label:'Initial Access', rules:['T1021']},
+  {label:'Execution',      rules:['T1059']},
+  {label:'Priv. Escalation', rules:['T1548','T1548-PRIV-POD','T1611']},
+  {label:'Lateral Movement', rules:['T1610']},
+  {label:'Credential Access', rules:['T1552']},
+  {label:'Impact',         rules:['T1496','T1499']},
+  {label:'RBAC Abuse',     rules:['T1548.005']},
+];
+function populateKcPodSelect(){
+  const sel=document.getElementById('kc-pod-select');
+  const prev=sel.value;
+  const withAlerts=gNodes.filter(n=>n.alert_count>0 && n.uid!=='admin' && n.uid!=='host' && !(n.uid||'').startsWith('rbac:'));
+  const options=withAlerts.length?withAlerts:gNodes.filter(n=>n.name==='attacker');
+  sel.innerHTML=options.map(n=>`<option value="${n.name}">${n.namespace}/${n.name}</option>`).join('');
+  if(prev && options.some(n=>n.name===prev)) sel.value=prev;
+  renderKillChain(sel.value||(options[0]&&options[0].name)||'attacker');
+}
+function renderKillChain(podName){
+  if(!podName) return;
+  const node=gNodes.find(n=>n.name===podName);
+  const match=node?alerts.filter(a=>a.namespace===node.namespace&&a.pod_name===node.name):[];
+  const rulesSeen=match.map(a=>a.rule).filter(Boolean);
+  const el=document.getElementById('kc-steps');
+  el.innerHTML=KC_STAGES.map(stage=>{
+    const hitCount=rulesSeen.filter(r=>stage.rules.includes(r)).length;
+    const hit=hitCount>0;
+    return `<div class="kc-step ${hit?'hit':''}">
+      <div class="kc-line"></div>
+      <div class="kc-node">${hit?'✓':'—'}</div>
+      ${hit?`<div class="kc-count">${hitCount}</div>`:''}
+      <div class="kc-label">${stage.label}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── MITRE Matrix page ──
+const MATRIX_TECHNIQUES=[
+  {id:'T1021', name:'Remote Services (kubectl exec)', tactic:'Lateral Movement'},
+  {id:'T1059', name:'Shell spawned in container', tactic:'Execution'},
+  {id:'T1611', name:'Escape to Host', tactic:'Priv. Escalation'},
+  {id:'T1548', name:'Abuse Elevation (sudo/setcap)', tactic:'Priv. Escalation'},
+  {id:'T1548.005', name:'RBAC cluster-admin grant', tactic:'Priv. Escalation'},
+  {id:'T1552', name:'Secret read via K8s API', tactic:'Credential Access'},
+  {id:'T1610', name:'Network Flow', tactic:'Lateral Movement'},
+  {id:'T1613', name:'RBAC discovery burst', tactic:'Discovery'},
+  {id:'T1496', name:'Cryptomining signature', tactic:'Impact'},
+  {id:'T1499', name:'Fork-bomb / resource abuse', tactic:'Impact'},
+];
+const MATRIX_TACTICS=['Lateral Movement','Execution','Priv. Escalation','Credential Access','Discovery','Impact'];
+function renderMitreMatrix(){
+  const grid=document.getElementById('matrix-grid');
+  const counts={};
+  alerts.forEach(a=>{ if(a.rule) counts[a.rule]=(counts[a.rule]||0)+1; });
+  grid.innerHTML='';
+  MATRIX_TACTICS.forEach(t=>{
+    const hd=document.createElement('div');
+    hd.className='matrix-col-hd'; hd.textContent=t;
+    grid.appendChild(hd);
+  });
+  MATRIX_TACTICS.forEach(tactic=>{
+    const techs=MATRIX_TECHNIQUES.filter(x=>x.tactic===tactic);
+    const maxRows=Math.max(...MATRIX_TACTICS.map(tc=>MATRIX_TECHNIQUES.filter(x=>x.tactic===tc).length));
+    for(let i=0;i<maxRows;i++){
+      const tech=techs[i];
+      const cell=document.createElement('div');
+      if(!tech){ cell.style.visibility='hidden'; grid.appendChild(cell); continue; }
+      const count=counts[tech.id]||0;
+      cell.className='matrix-cell'+(count>0?(count>=3?' hit':' hit-med'):'');
+      cell.title=MITRE_DESC[tech.id]||'';
+      cell.innerHTML=`<div><div class="matrix-cell-id">${tech.id}</div><div class="matrix-cell-name">${tech.name}</div></div><div class="matrix-cell-count">${count}</div>`;
+      grid.appendChild(cell);
+    }
+  });
+}
+
+function renderPodList(nodes){
+  const list=document.getElementById('pod-list');
+  const sorted=[...nodes].sort((a,b)=>{
+    const s={critical:0,high:1,medium:2,clean:3};
+    return (s[a.severity]||3)-(s[b.severity]||3);
+  });
+  list.innerHTML='';
+  sorted.forEach(node=>{
+    if(node.uid==='admin') return; // skip virtual node in list
+    const color=SEV_COLORS[node.severity]||'#64748b';
+    if(node.alert_count>0) podColor(node.namespace+'/'+node.name);
+    const div=document.createElement('div');
+    div.className=`pod-item sev-${node.severity}${expandedPod===node.uid?' expanded':''}`;
+    div.onclick=()=>{
+      selPod=node.uid;
+      expandedPod=(expandedPod===node.uid)?null:node.uid;
+      renderPodList(gNodes);
+    };
+    const badgesHtml=node.alert_count>0
+      ?`<div class="badge ${node.severity==='critical'?'crit':node.severity==='high'?'high':'med'}">${node.severity.toUpperCase()}</div>`
+      :`<div class="badge ok">CLEAN</div>`;
+    div.innerHTML=`
+      <div class="pi-icon" style="background:${color}22;color:${color}">${podInitials(node.name)}</div>
+      <div class="pi-info">
+        <div class="pi-name">${node.name}</div>
+        <div class="pi-ns">${node.namespace}</div>
+        <div class="pi-uid">${(node.uid||'').slice(0,18)}…</div>
+      </div>
+      <div class="pi-badges">${badgesHtml}${node.alert_count>0?`<div class="badge info">${node.alert_count} alerts</div>`:''}</div>
+    `;
+    list.appendChild(div);
+    if(expandedPod===node.uid){
+      const stats=podStats(node);
+      const exp=document.createElement('div');exp.className='pod-expand';
+      if(stats.count===0){
+        exp.innerHTML=`<div class="pe-row"><span class="pe-label">Status</span><span class="pe-val">No alerts recorded for this pod</span></div>`;
+      } else {
+        exp.innerHTML=`
+          <div class="pe-row"><span class="pe-label">First Seen</span><span class="pe-val">${stats.first.rule} @ ${stats.first.timestamp?new Date(stats.first.timestamp).toTimeString().slice(0,8):'—'}</span></div>
+          <div class="pe-row"><span class="pe-label">Last Seen</span><span class="pe-val">${stats.last.rule} @ ${stats.last.timestamp?new Date(stats.last.timestamp).toTimeString().slice(0,8):'—'}</span></div>
+          <div class="pe-row"><span class="pe-label">Total Alerts</span><span class="pe-val">${stats.count}</span></div>
+          <div class="pe-row"><span class="pe-label">Techniques</span><div class="pe-techs">${stats.techs.map(t=>`<span class="pe-tech" title="${MITRE_DESC[t]||''}">${t}</span>`).join('')}</div></div>
+        `;
+      }
+      list.appendChild(exp);
+    }
+  });
+}
+
+let alertSortMode='time';
+const SEV_RANK={CRITICAL:0,HIGH:1,MEDIUM:2};
+function sortedAlertsView(){
+  if(alertSortMode==='time') return alerts.slice().reverse();
+  return alerts.slice().sort((a,b)=>{
+    const r=(SEV_RANK[a.severity]??3)-(SEV_RANK[b.severity]??3);
+    if(r!==0) return r;
+    return new Date(b.timestamp||0)-new Date(a.timestamp||0);
+  });
+}
+function setAlertSort(mode){
+  alertSortMode=mode;
+  document.getElementById('sort-time-btn').classList.toggle('active',mode==='time');
+  document.getElementById('sort-sev-btn').classList.toggle('active',mode==='severity');
+  renderAlerts(sortedAlertsView());
+}
+
+function renderAlerts(list){
+  const feed=document.getElementById('alert-list');
+  feed.innerHTML='';
+  list.slice(0,50).forEach(a=>feed.appendChild(makeAlertEl(a)));
+  document.getElementById('alert-count').textContent=list.length+' alerts';
+}
+
+function prependAlert(a){
+  if(alertSortMode==='severity'){
+    renderAlerts(sortedAlertsView());
+    return;
+  }
+  const feed=document.getElementById('alert-list');
+  feed.insertBefore(makeAlertEl(a),feed.firstChild);
+  document.getElementById('alert-count').textContent=alerts.length+' alerts';
+}
+
+function makeAlertEl(a){
+  const el=document.createElement('div');
+  el.className=`alert-item ${a.severity}`;
+  const ts=a.timestamp?new Date(a.timestamp).toTimeString().slice(0,8):'—';
+  const podKey=(a.namespace||'')+'/'+(a.pod_name||'');
+  const dotColor=a.pod_name?podColor(podKey):'#475569';
+  el.innerHTML=`
+    <div class="at"><span class="asev">${a.severity}</span><span class="arule" title="${ruleTitle(a.rule)}">${a.rule}</span><span class="atime">${ts}</span></div>
+    <div class="adesc">${a.description||''}</div>
+    <div class="ameta">
+      <span class="atag"><span class="pod-dot" style="background:${dotColor}"></span>${a.namespace||''}/${a.pod_name||''}</span>
+      ${a.binary?`<span class="atag">${a.binary}</span>`:''}
+      ${a.secret_name?`<span class="atag">secret:${a.secret_name}</span>`:''}
+    </div>`;
+  return el;
+}
+
+const EVT_LABELS={process_exec:'EXEC',k8s_secret_access:'AUDIT',pod_exec:'EXEC',network_connect:'NET'};
+function prependEvent(ev){
+  const stream=document.getElementById('evt-stream');
+  const el=document.createElement('div');el.className='evt';
+  el.style.background='rgba(59,130,246,.04)';
+  const ts=ev.timestamp?new Date(ev.timestamp).toTimeString().slice(0,8):new Date().toTimeString().slice(0,8);
+  const label=EVT_LABELS[ev.event_type]||ev.event_type;
+  let body='';
+  if(ev.event_type==='process_exec') body=ev.binary||'';
+  else if(ev.event_type==='k8s_secret_access') body=`secret ${ev.verb} by ${ev.user||''}`;
+  else if(ev.event_type==='pod_exec') body=`kubectl exec → ${ev.target_pod||''} by ${ev.user||''}`;
+  else body=JSON.stringify(ev).slice(0,60);
+  el.innerHTML=`<span class="et">${ts}</span><span class="ek ${ev.event_type}">${label}</span><span class="eb"><span class="ep">${ev.pod_name||ev.namespace||''}</span> · <span class="ebn">${body}</span></span>`;
+  stream.insertBefore(el,stream.firstChild);
+  setTimeout(()=>el.style.background='',500);
+  while(stream.children.length>200) stream.removeChild(stream.lastChild);
+}
+
+setInterval(()=>{
+  document.getElementById('m-evts').textContent=evtMinBucket*6;
+  evtMinBucket=0;
+},10000);
+
+setInterval(()=>{fetchStats();fetchGraph();},5000);
+
+fetchAll().then(()=>{connectAlertStream();connectEventStream();});
+</script>
+</body>
+</html>

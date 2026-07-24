@@ -1,0 +1,35 @@
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+  - level: None
+    users: ["system:kube-proxy"]
+
+  # Request-only (no response body) for secrets: avoids writing decrypted
+  # secret values into the on-disk audit log while still keeping enough
+  # metadata (user, verb, objectRef) for T1552 detection.
+  - level: Request
+    resources:
+      - group: ""
+        resources: ["secrets"]
+    verbs: ["get","list","watch","create","patch","delete"]
+
+  - level: Request
+    resources:
+      - group: ""
+        resources: ["pods/exec"]
+
+  # Full request/response bodies needed to inspect pod securityContext,
+  # RBAC roleRef/subjects, and Role/ClusterRole rules.
+  - level: RequestResponse
+    resources:
+      - group: ""
+        resources: ["pods", "secrets", "serviceaccounts"]
+      - group: "rbac.authorization.k8s.io"
+        resources: ["clusterrolebindings", "rolebindings", "clusterroles", "roles"]
+
+  - level: Metadata
+    verbs: ["impersonate"]
+
+  - level: Metadata
+    omitStages:
+      - "RequestReceived"

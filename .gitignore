@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.bak
+venv/
+.venv/
+week4/eval_*.log
+inspect.json
