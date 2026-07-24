@@ -37,8 +37,12 @@ class AuditLogConsumer:
 
     def _read_loop(self):
         cluster_name = os.environ.get("CAGE_CONTROL_PLANE", "cage-control-plane")
+        # -F (not -f): follow by filename with retry, so a rotated audit.log
+        # (kube-apiserver renames it at audit-log-maxsize and starts a new
+        # file at the same path) gets picked back up instead of leaving us
+        # reading a dead file descriptor forever.
         cmd = ["docker", "exec", cluster_name, "stdbuf", "-oL",
-               "tail", "-f", "-n", "0", "/var/log/kubernetes/audit.log"]
+               "tail", "-F", "--retry", "-n", "0", "/var/log/kubernetes/audit.log"]
         while True:
             try:
                 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
