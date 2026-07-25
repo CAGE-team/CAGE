@@ -45,7 +45,14 @@ def main():
 
         t1_wall = None
         matched_line = None
-        deadline_mono = time.monotonic() + 30
+        # Widened from 30s: live audit measurement (2026-07-25) found the
+        # kubectl-exec/tetra-getevents delivery pipe to the consumer can lag
+        # up to ~28s even for a single trial in this environment, uncomfortably
+        # close to the old 30s ceiling. A timeout here doesn't mean "no
+        # detection" — it means "not detected within the window" — so a
+        # too-tight deadline silently corrupts latency figures by dropping
+        # slow-but-real detections instead of recording their true latency.
+        deadline_mono = time.monotonic() + 60
         while time.monotonic() < deadline_mono:
             lines, pos = tail_new_lines(logfile, pos)
             for line in lines:

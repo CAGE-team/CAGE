@@ -131,24 +131,30 @@ false-positive source, tracked as an open item below.
 > **Reproducibility note on the above.** `results_benign.csv` predates this
 > repo's reconciliation merge with no accompanying generation script or
 > documented commands — only the four category names and their aggregate
-> results survive. Investigating this turned up a real inconsistency:
-> `causal_graph.py`'s `_check_t1021()` has no whitelist check at all (unlike
-> `_check_t1059`/`_check_t1548_privesc`), so it fires on *every* `kubectl
-> exec` unconditionally — there's no pod, whitelisted or not, that a real
-> exec could target today and produce the documented "T1021: 0/10" result.
-> Rather than guess at the original commands, `week4/run_benign_controls.py`
-> implements a new, explicitly-documented methodology (using `legitimate-app`
-> — the one pod name on `SHELL_WHITELIST_POD_PREFIXES` — for the
-> whitelist-suppression trials, and the previously-unused `benign-worker`
-> from `week4/benign-app.yaml` for genuine sub-threshold network traffic)
-> and writes to `week4/results_benign_v2.csv`, leaving the original file
-> untouched as historical, pre-burst-threshold-fix data. A reduced-trial
-> live run confirmed it end-to-end: `T1059_whitelisted` 0/3, `T1021` 3/3
-> (expected — see above), `T1548_whitelisted` 0/3, and **`T1610` 0/3**,
-> which is the actual answer to the open item below: the burst-threshold
-> fix holds up against ordinary, non-scan-like pod-to-pod traffic. Run
-> `python3 week4/run_benign_controls.py <server-logfile>` for the full
-> 10-trial version.
+> results survive. `week4/run_benign_controls.py` implements a new,
+> explicitly-documented methodology against the current code and writes to
+> `week4/results_benign_v2.csv`, leaving the original file untouched as
+> historical, pre-whitelist-removal data.
+>
+> **Update (2026-07-25):** a later change removed `causal_graph.py`'s
+> pod-name-based whitelist entirely (it was a real detection bypass — an
+> attacker could name their own pod `legitimate-app-evil` and evade
+> T1059/T1611/T1548/T1496/T1499 detection outright). Scope exclusion is now
+> namespace-only. That means T1059/T1021/T1548 have no pod-identity
+> exemption left at all — verified live: `legitimate-app` now fires all
+> three unconditionally, where it previously stayed silent for two of them.
+> `run_benign_controls.py` and its category labels were updated to match
+> (`T1059_unconditional` / `T1021_unconditional` / `T1548_unconditional` —
+> renamed from `*_whitelisted`, since there is no longer a whitelist to
+> test). A fresh live run confirmed the corrected script end-to-end:
+> `T1059_unconditional` 2/2, `T1021_unconditional` 2/2, `T1548_unconditional`
+> 2/2 — all fire every time, by design, not a regression — and
+> **`T1610_benign` 0/2**, which is the one category with genuine behavioral
+> discrimination (a 5-distinct-destination/10s burst, independent of pod
+> identity) and is the actual answer to the open item below: the
+> burst-threshold fix holds up against ordinary, non-scan-like pod-to-pod
+> traffic. Run `python3 week4/run_benign_controls.py <server-logfile>` for
+> the full 10-trial version.
 
 ## Known limitations
 
@@ -162,15 +168,16 @@ false-positive source, tracked as an open item below.
   traffic (see benign controls above, captured before this fix). The rule now
   requires a scan-like burst (5+ distinct destination pods within 10s) instead
   of firing on a single ordinary connection. Re-validated with
-  `week4/run_benign_controls.py` (see the reproducibility note above): 0/3
-  false positives on sub-threshold traffic in a live run — full 10-trial
-  confirmation still pending, tracked below.
-- T1021 (`_check_t1021` in `causal_graph.py`) has no whitelist check, unlike
-  every other shell/exec/privesc rule — it fires on any `kubectl exec` into
-  any pod, with no behavioral or pod-identity discrimination. Whether that's
-  intentional (all remote exec is inherently worth flagging) or a gap versus
-  the original design is unresolved — see the benign-controls reproducibility
-  note above.
+  `week4/run_benign_controls.py` (see the reproducibility note above) — full
+  10-trial confirmation still pending, tracked below.
+- T1021 (`_check_t1021` in `causal_graph.py`) is the one rule with no scope
+  exclusion at all — not even the namespace-level check every other
+  behavioral rule has (`_is_whitelisted`, namespace-only since the pod-name
+  whitelist was removed). It fires on any `kubectl exec` into any pod,
+  including routine admin access into a `kube-system` component. Whether
+  that's intentional (all remote exec is inherently worth flagging,
+  regardless of target) or should get the same namespace exclusion as the
+  other rules is an open design question, not yet resolved.
 - 120-second correlation window — an attack chain must complete inside that
   window to be linked. Configurable.
 
@@ -183,7 +190,8 @@ false-positive source, tracked as an open item below.
 - [x] Container escape / privilege escalation / resource abuse / RBAC abuse detection
 - [x] Ablation study + benign controls + latency capture
 - [x] Re-validate T1610 false-positive rate on benign traffic after burst-threshold fix
-      (0/3 in a reduced live run via `week4/run_benign_controls.py`)
+      (confirmed in a reduced live run via `week4/run_benign_controls.py` — see
+      Evaluation section above for the numbers)
 - [ ] Full 10-trial run of `week4/run_benign_controls.py` for the paper's final numbers
 - [ ] Multi-node cluster validation
 - [ ] Write-up / paper

@@ -11,44 +11,36 @@ only the four category names ("T1059/T1021/T1548/T1610 control", per
 README.md's Evaluation section) and their aggregate results survive. This
 script does NOT reproduce that exact original methodology — it cannot be
 recovered from anything in this repository. It implements a new, clearly
-specified benign-control methodology against the CURRENT detection code,
-chosen to be the most plausible reconstruction of the documented intent —
-see README.md's Evaluation section for the full writeup of this
-investigation, including one inconsistency that could not be resolved.
+specified benign-control methodology against the CURRENT detection code.
 
-What's reconstructable from the repo and used here:
-  - The four categories (benign analogs of T1059/T1021/T1548/T1610) and a
-    10-trial-per-category design, matching every other trial-based script
-    in week4/ (run_ablation.py, capture_latency.py, run_t1548_trials.sh).
-  - "legitimate-app" almost certainly exists specifically to be the
-    "known good" pod for this purpose: it's the one pod name that matches
-    causal_graph.py's SHELL_WHITELIST_POD_PREFIXES, and its whitelisting
-    is otherwise unused by any attack script.
-  - week4/benign-app.yaml (a "benign-worker" pod, NOT on the whitelist)
-    already existed in this repo but was never referenced by any script —
-    almost certainly the intended target for the T1610 traffic control,
-    since legitimate-app being whitelisted would make a T1610 test against
-    it structurally unable to ever fire, which contradicts the documented
-    10/10-fired result for that category.
+IMPORTANT — this file's own history is itself an example of why "whitelisted
+pod" framing is fragile: an earlier version of this script relied on
+causal_graph.py's now-removed SHELL_WHITELIST_POD_PREFIXES (a pod-name
+whitelist that exempted anything named "legitimate-app*"/"debug-*" from
+T1059/T1611/T1548/T1496/T1499). That mechanism was deliberately removed —
+see causal_graph.py's _is_whitelisted() docstring — because a name-based
+exemption is a real bypass: an attacker's own pod named "legitimate-app-evil"
+would have gone undetected. Detection scope is now namespace-only
+(SYSTEM_NAMESPACES, in uid_resolver.py), which "legitimate-app" was never
+on (it's a regular default-namespace pod). This was verified live: a plain
+`kubectl exec legitimate-app -- sh -c "id"` now fires both T1021 (always
+did — no whitelist check ever existed for it) and T1059 (previously
+suppressed, now correctly does not distinguish this pod from any other).
 
-What could NOT be reconstructed or verified:
-  - The exact original commands. "Benign shell use" / "benign exec" /
-    "benign privileged behavior" (README's phrasing) admit many equally
-    plausible literal commands; none survive anywhere in the repo.
-  - Why the original T1021 control reportedly showed 0/10. Traced
-    causal_graph.py's _check_t1021(): unlike _check_t1059 and
-    _check_t1548_privesc, it has NO whitelist check at all — it fires on
-    every single pod_exec event unconditionally. That means, against the
-    code currently in this repository, there is no pod (whitelisted or
-    not) a real `kubectl exec` could target and produce a 0/10 result.
-    Possible explanations: the original trial never actually ran
-    `kubectl exec` despite the category name, or _check_t1021 once had a
-    whitelist check that was since removed, or the original number is
-    stale/wrong. This script does not guess further — it runs the T1021
-    trial anyway (against legitimate-app, for consistency with the other
-    two whitelisted trials) and documents in its own output that a
-    high/100% fire rate is the *expected*, current-code-correct outcome,
-    not a regression to chase.
+What that means for these categories:
+  - T1059 / T1021 / T1548 now have NO pod-identity-based exemption at all —
+    each fires unconditionally on any matching event outside a system
+    namespace, full stop. There is no "benign" version of a shell exec, a
+    remote exec, or an su/sudo/setcap call that this design intends to stay
+    silent on — silence was never the goal; the goal was "an attacker
+    cannot buy their way out of detection by naming their pod carefully."
+    These three categories below are kept as *regression evidence* that
+    this unconditional behavior actually holds against the current code —
+    expected result is 100% fired, and that is correct, not a bug.
+  - T1610 is the one rule with real behavioral discrimination (a
+    5-distinct-destination/10s burst, not "any connection") independent of
+    pod identity or namespace, so it remains the only category that
+    measures an actual false-positive rate in the traditional sense.
 
 Usage:
     python3 week4/run_benign_controls.py <logfile> [output_csv]
@@ -59,36 +51,42 @@ run_ablation.py) so fired/not-fired can be determined by tailing it.
 import subprocess, time, sys, csv, os
 
 TRIALS_PER_CATEGORY = int(os.environ.get("BENIGN_TRIALS", "10"))
-DETECT_WAIT_SECONDS = 15  # a benign trial should NOT alert; this is how
-                          # long we watch before concluding "stayed silent"
+DETECT_WAIT_SECONDS = 60  # Live audit measurement (2026-07-25) found the
+                          # kubectl-exec/tetra-getevents delivery pipe can lag
+                          # up to ~28s for a single trial and appeared to grow
+                          # across rapid consecutive trials -- exactly what
+                          # this script runs (10 back-to-back trials per
+                          # category). Too short a window here has two-sided
+                          # risk: for T1059/T1021/T1548 it misreports a real
+                          # detection as "stayed silent"; for T1610 it's safe
+                          # either way since that category's success case is
+                          # already "no match found" (see wait_for_fire).
 
 BENIGN_APP_YAML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "benign-app.yaml")
 
 CATEGORIES = [
     {
-        "label": "T1059_whitelisted",
+        "label": "T1059_unconditional",
         "check_pattern": "T1059",
         "cmd": ["kubectl", "exec", "legitimate-app", "--", "sh", "-c", "id"],
-        "note": "legitimate-app is on SHELL_WHITELIST_POD_PREFIXES -- tests "
-                "whether the whitelist suppresses an otherwise T1059-shaped "
-                "shell exec. Expected: never fires.",
+        "note": "No pod-identity exemption exists for T1059 (namespace-only "
+                "scope, and legitimate-app is a regular default-namespace "
+                "pod). Expected: fires every trial, by design.",
     },
     {
-        "label": "T1021_no_whitelist_check",
+        "label": "T1021_unconditional",
         "check_pattern": "T1021",
         "cmd": ["kubectl", "exec", "legitimate-app", "--", "sh", "-c", "id"],
-        "note": "_check_t1021 has NO whitelist check in the current code -- "
-                "expected to fire on every trial regardless of target pod. "
-                "Included to document current behavior, not to claim a "
-                "0/10 result (see module docstring).",
+        "note": "_check_t1021 has never had any exemption (namespace or "
+                "pod-name) -- fires on every pod_exec event unconditionally. "
+                "Expected: fires every trial, by design.",
     },
     {
-        "label": "T1548_whitelisted",
+        "label": "T1548_unconditional",
         "check_pattern": "T1548",
         "cmd": ["kubectl", "exec", "legitimate-app", "--", "su", "root", "-c", "id"],
-        "note": "legitimate-app is on SHELL_WHITELIST_POD_PREFIXES -- tests "
-                "whether the whitelist suppresses an actual su invocation. "
-                "Expected: never fires.",
+        "note": "No pod-identity exemption exists for T1548 either. "
+                "Expected: fires every trial, by design.",
     },
 ]
 

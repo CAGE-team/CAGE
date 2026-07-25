@@ -135,9 +135,16 @@ Avg detection latency: ~7s (cold start), ~4.7s steady state
    events + eBPF network kprobe + K8s audit secret access. This 3-hop
    network chain is not detected by any related work on Kubernetes.
 
-4. **Zero false positives by design** — whitelist by namespace
-   (kube-system filtered), by pod name prefix (legitimate-app filtered),
-   by IP range (only 10.244.x.x pod-network connections flagged).
+4. **Low false positives by design, without a naming loophole** — scope
+   exclusion is namespace-only (kube-system/local-path-storage filtered as
+   cluster infrastructure), never by pod name. An earlier version exempted
+   pods by name prefix (e.g. "legitimate-app") and by a hardcoded pod-CIDR
+   range for network events — both were removed: a name-based exemption
+   lets an attacker dodge detection just by naming their pod
+   "legitimate-app-evil", and a hardcoded CIDR breaks on any cluster whose
+   pod network isn't 10.244.0.0/16. Network events are now scoped by
+   requiring both source and destination to resolve to a real pod via the
+   live UID cache, which works on any cluster regardless of its CIDR.
 
 5. **Live SOC dashboard** — canvas-based attack graph with draggable
    nodes, animated edges showing attack path, SSE streaming alerts,
@@ -263,8 +270,17 @@ Open browser → http://localhost:5000
 kubectl exec attacker -- bash -c "id && whoami"
 sleep 2
 
-# T1610: lateral network movement
-kubectl exec attacker -- bash -c "curl -s --max-time 3 http://10.244.0.11 || true"
+# T1610: lateral network movement — needs a burst to 5+ distinct pods
+# within 10s (single-connection T1610 was removed as a false-positive
+# source; see "Known limitations"). week4/scan-targets.yaml provisions
+# the 5 target pods this needs — deploy once per cluster:
+kubectl apply -f week4/scan-targets.yaml
+kubectl wait --for=condition=Ready pod -l app=scan-targets --timeout=60s
+mapfile -t TARGET_IPS < <(kubectl get pods -l app=scan-targets -o wide --no-headers | awk '{print $6}' | sort -u)
+for ip in "${TARGET_IPS[@]}"; do
+  kubectl exec attacker -- bash -c "exec 3<>/dev/tcp/${ip}/80; sleep 6; exec 3<&-" &
+done
+wait
 sleep 2
 
 # T1552: secret access

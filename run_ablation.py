@@ -48,7 +48,14 @@ def main():
             subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
             fired = 0
-            deadline = time.monotonic() + 15
+            # Widened from 15s: live audit measurement (2026-07-25) found
+            # Tetragon's own kernel-side capture is sub-second, but the
+            # kubectl-exec/tetra-getevents delivery pipe to this consumer
+            # can lag up to ~28s under this environment's conditions, and
+            # the lag appeared to grow across rapid consecutive trials. A
+            # too-short window doesn't mean "not detected" — it means "not
+            # detected *yet*", and would silently record false negatives.
+            deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
                 with open(logfile, "r") as f:
                     f.seek(pos)
