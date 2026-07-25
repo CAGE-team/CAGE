@@ -1,6 +1,12 @@
 #!/bin/bash
 set -x
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo "### Ensuring scan-target pods exist ###"
+kubectl apply -f "$SCRIPT_DIR/scan-targets.yaml" > /dev/null
+kubectl wait --for=condition=Ready pod -l app=scan-targets --timeout=60s > /dev/null 2>&1
+
 echo "### Gathering distinct pod IPs to scan (need 5+ within 10s) ###"
 mapfile -t TARGET_IPS < <(kubectl get pods -l app=scan-targets -o wide --no-headers | awk '{print $6}' | sort -u)
 

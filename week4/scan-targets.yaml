@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scan-targets
+  namespace: default
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: scan-targets
+  template:
+    metadata:
+      labels:
+        app: scan-targets
+    spec:
+      containers:
+      - name: target
+        image: ubuntu:latest
+        command: ["sleep", "infinity"]

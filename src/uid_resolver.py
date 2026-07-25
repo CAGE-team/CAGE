@@ -1,5 +1,6 @@
 import threading
 import logging
+import time
 from kubernetes import client, config, watch
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -14,12 +15,17 @@ class PodUIDCache:
       (namespace, sa_name) -> set of uids
     """
 
+    WATCH_BACKOFF_INITIAL = 1
+    WATCH_BACKOFF_MAX = 30
+    WATCH_DEGRADED_THRESHOLD = 5   # consecutive failures before flagging degraded
+
     def __init__(self):
         self._lock = threading.RLock()
         self._name_to_uid = {}   # (ns, name) -> uid
         self._ip_to_uid   = {}   # ip -> uid
         self._sa_to_uids  = {}   # (ns, sa) -> set(uid)
         self._uid_to_meta = {}   # uid -> {name, ns, ip, sa, node}
+        self.degraded = False    # true once consecutive watch failures cross the threshold
 
     # ── lookups ──────────────────────────────────────────────────────────────
 
@@ -101,24 +107,49 @@ class PodUIDCache:
         v1 = client.CoreV1Api()
         w  = watch.Watch()
 
+        backoff = self.WATCH_BACKOFF_INITIAL
+        consecutive_failures = 0
+
         while True:
             try:
                 for event in w.stream(v1.list_pod_for_all_namespaces, timeout_seconds=0):
+                    # A live event proves the connection is healthy again —
+                    # reset here rather than waiting for stream() to return,
+                    # since with timeout_seconds=0 it normally never returns
+                    # cleanly (it exits via exception when the connection drops).
+                    if consecutive_failures:
+                        backoff = self.WATCH_BACKOFF_INITIAL
+                        consecutive_failures = 0
+                        if self.degraded:
+                            self.degraded = False
+                            log.info("Watch recovered; leaving degraded state")
+
                     etype = event["type"]   # ADDED / MODIFIED / DELETED
                     pod   = event["object"]
                     if etype in ("ADDED", "MODIFIED"):
                         self._add(pod)
                     elif etype == "DELETED":
                         self._remove(pod)
+                # stream ended cleanly with no events at all in this attempt
+                backoff = self.WATCH_BACKOFF_INITIAL
+                consecutive_failures = 0
             except Exception as e:
-                log.warning(f"Watch error (will retry): {e}")
+                consecutive_failures += 1
+                if consecutive_failures >= self.WATCH_DEGRADED_THRESHOLD and not self.degraded:
+                    self.degraded = True
+                    log.error(
+                        f"Watch failed {consecutive_failures} times consecutively; "
+                        f"entering degraded state (uid cache is stale): {e}"
+                    )
+                else:
+                    log.warning(f"Watch error (will retry in {backoff}s): {e}")
+                time.sleep(backoff)
+                backoff = min(backoff * 2, self.WATCH_BACKOFF_MAX)
 
 
 # ── quick smoke-test ──────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import time
-
     cache = PodUIDCache()
     cache.start_watch()
 

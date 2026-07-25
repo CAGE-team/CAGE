@@ -6,7 +6,7 @@ kubectl exec attacker -- su root -c "id"
 sleep 1
 kubectl exec attacker -- chroot / /bin/true
 sleep 1
-kubectl exec attacker -- kubectl get secrets -A
+kubectl exec attacker -- bash -c 'TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token); curl -s -k -H "Authorization: Bearer $TOKEN" https://kubernetes.default.svc/api/v1/secrets'
 sleep 2
 
 echo "### T1496: cryptomining process signature (dummy binary named xmrig) ###"
@@ -19,7 +19,7 @@ sleep 2
 
 echo "### T1613: RBAC/resource discovery burst (10 reads in <30s, same identity) ###"
 for i in $(seq 1 10); do
-  kubectl exec attacker -- kubectl get clusterrolebindings > /dev/null 2>&1
+  kubectl exec attacker -- bash -c 'TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token); curl -s -k -H "Authorization: Bearer $TOKEN" https://kubernetes.default.svc/apis/rbac.authorization.k8s.io/v1/clusterrolebindings' > /dev/null 2>&1
 done
 sleep 2
 

