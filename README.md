@@ -164,12 +164,33 @@ false-positive source, tracked as an open item below.
 > only manifests once the connection has been open a while — `tetra`
 > exposes no CLI flag to control this, and `stdbuf` cannot help (it
 > intercepts glibc's buffering, but `tetra` is a Go binary with its own
-> internal I/O). A concrete, not-yet-implemented follow-up: periodically
-> cycling `tetragon_consumer.py`'s subprocess connection (e.g. every ~20s,
-> before it ages into the slow regime) instead of holding one connection
-> open indefinitely — untested here due to the risk of event loss/
-> duplication across a reconnect without further validation budget. The
-> 60s eval-script timeouts (below) are a safe mitigation regardless of
+> internal I/O).
+>
+> **Update (2026-07-25, connection-cycling attempt — reverted):** implemented
+> and live-tested the natural follow-up — periodically restarting
+> `tetragon_consumer.py`'s subprocess (every 15s, before it could age into
+> the slow regime) instead of holding one connection open indefinitely.
+> Result: **not a reliable fix, reverted.** Two real bugs were found and
+> fixed along the way (killing the local `kubectl exec` client does not
+> kill the remote `tetra getevents` process it spawned — orphaned
+> processes piled up every cycle, and even after fixing that, SIGTERM
+> didn't kill them, only `SIGKILL` did), but after both fixes, repeated
+> live trials still showed inconsistent latency (~0.5s to ~23s across
+> different trials on the same running server) and at least one attack
+> was **genuinely lost** — not delayed, no matching alert ever appeared —
+> well outside any reconnect gap. That rules out the original clean
+> isolated-test finding as the complete picture: this cluster's aggregate
+> concurrent `kubectl exec` load (`NetworkMonitor` alone runs 8 concurrent
+> `kubectl exec` calls every 5s) is a more likely factor than pure
+> single-connection age, but that wasn't confirmed either — the attempt
+> was reverted before root-causing it further, since a security detection
+> tool silently dropping events is a worse failure mode than being
+> transparently slow, and this needed more validation budget than was
+> available in this session. **Do not re-attempt subprocess-cycling as a
+> latency fix without first isolating whether the inconsistency is
+> connection-age or concurrent-load driven** — this session's attempt
+> conflated the two. The 60s eval-script timeouts (below) are a safe
+> mitigation regardless of
 > whether that follow-up is ever implemented.
 >
 > **Update (2026-07-25, whitelist removal):** a later change removed `causal_graph.py`'s
