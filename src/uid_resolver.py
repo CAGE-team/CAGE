@@ -6,6 +6,15 @@ from kubernetes import client, config, watch
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger("uid-resolver")
 
+# Namespaces treated as cluster/platform infrastructure rather than user
+# workload space, and therefore excluded from workload-behavior detection
+# (T1059/T1611/T1548/T1496/T1499/T1610) across every consumer. This is the
+# single shared definition — causal_graph.py, network_monitor.py, and
+# tetragon_consumer.py all import this instead of keeping their own copies,
+# so a cluster with differently-named platform namespaces only needs one
+# edit, not three.
+SYSTEM_NAMESPACES = frozenset({"kube-system", "local-path-storage"})
+
 class PodUIDCache:
     """
     Live cache of pod identity mappings, updated via K8s watch.

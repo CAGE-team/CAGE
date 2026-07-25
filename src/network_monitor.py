@@ -5,6 +5,7 @@ import logging
 import time
 import socket
 import struct
+from src.uid_resolver import SYSTEM_NAMESPACES
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger("network-monitor")
@@ -15,12 +16,6 @@ def hex_to_ip(hex_str):
 
 def hex_to_port(hex_str):
     return int(hex_str, 16)
-
-# Namespaces excluded from auto-discovered monitoring: constant churn from
-# system components (kube-proxy, coredns, kindnet, ...) with no attack-
-# detection value — causal_graph.py's own SHELL_WHITELIST_NAMESPACES
-# excludes the same two for the same reason.
-SYSTEM_NAMESPACES = {"kube-system", "local-path-storage"}
 
 def read_proc_net_tcp(namespace, pod_name):
     """Read /proc/net/tcp from inside a pod via kubectl exec"""
@@ -61,6 +56,25 @@ class NetworkMonitor:
         self.out_queue = out_queue
         self.poll_interval = poll_interval
         self._seen = set()  # avoid duplicate events
+        self._api_server_ip = self._resolve_api_server_ip()
+
+    def _resolve_api_server_ip(self):
+        """Look up the real in-cluster API server ClusterIP instead of
+        hardcoding kind's default (10.96.0.1) — that value only holds
+        because kind defaults to the 10.96.0.0/12 service CIDR; a cluster
+        configured with a different service CIDR has a different address
+        here, and without this the hardcoded value silently stops excluding
+        the API server, turning routine in-cluster API calls into apparent
+        T1610 scan traffic."""
+        try:
+            from kubernetes import client
+            svc = client.CoreV1Api().read_namespaced_service("kubernetes", "default")
+            ip = svc.spec.cluster_ip
+            log.info(f"Resolved in-cluster API server ClusterIP: {ip}")
+            return ip
+        except Exception as e:
+            log.warning(f"Could not resolve API server ClusterIP, falling back to none: {e}")
+            return None
 
     def start(self, pods_to_monitor=None):
         # List of (namespace, pod_name) pairs. If not given explicitly,
@@ -98,8 +112,10 @@ class NetworkMonitor:
         for conn in conns:
             remote_ip = conn["remote_ip"]
 
-            # Skip loopback and kubernetes API server
-            if remote_ip.startswith("127.") or remote_ip == "10.96.0.1":
+            # Skip loopback and the kubernetes API server (resolved dynamically
+            # at startup — see _resolve_api_server_ip — rather than assuming
+            # kind's default ClusterIP).
+            if remote_ip.startswith("127.") or (self._api_server_ip and remote_ip == self._api_server_ip):
                 continue
 
             # Look up source pod UID

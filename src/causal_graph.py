@@ -2,12 +2,10 @@ import threading
 import logging
 from datetime import datetime, timedelta
 import networkx as nx
+from src.uid_resolver import SYSTEM_NAMESPACES
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger("causal-graph")
-
-SHELL_WHITELIST_NAMESPACES = {"kube-system", "local-path-storage"}
-SHELL_WHITELIST_POD_PREFIXES = ("legitimate-app", "debug-", "init-", "victim")
 
 # --- Container escape (T1611) ---
 ESCAPE_BINARIES = {
@@ -137,10 +135,13 @@ class CausalGraph:
             return alerts
 
     def _is_whitelisted(self, event):
-        ns = event.get("namespace", "")
-        pod = event.get("pod_name", "") or ""
-        return ns in SHELL_WHITELIST_NAMESPACES or \
-               any(pod.startswith(p) for p in SHELL_WHITELIST_POD_PREFIXES)
+        # Scope exclusion is namespace-based only (cluster/platform
+        # infrastructure), never pod-name-based. A name-prefix whitelist
+        # (e.g. exempting anything named "legitimate-app*" or "debug-*")
+        # would be a real bypass in production: any workload — or an
+        # attacker's own pod — that happens to match the prefix would go
+        # completely undetected for T1059/T1611/T1548/T1496/T1499.
+        return event.get("namespace", "") in SYSTEM_NAMESPACES
 
     def _recent_remote_exec(self, pod_uid, current_ts):
         """True if a T1021 (kubectl exec) event for this pod landed within the

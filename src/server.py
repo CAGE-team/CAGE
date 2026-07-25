@@ -253,7 +253,7 @@ def get_graph():
         'uid': 'admin',
         'name': 'kubectl-admin',
         'namespace': 'external',
-        'ip': '172.18.0.1',
+        'ip': '',
         'node': 'host',
         'severity': 'clean',
         'alert_count': 0,

@@ -102,7 +102,7 @@ class AuditLogConsumer:
 
         if resource == "secrets" and verb in ("get", "list", "create", "patch", "delete"):
             pod_name, pod_uid, namespace = self._extract_pod_identity(obj, extra)
-            if pod_name and pod_name not in ("legitimate-app",):
+            if pod_name:
                 secret_name = obj.get("name", "<list>")
                 log.info(f"[AUDIT] secret {verb} by {username} | pod={pod_name}")
                 events.append({

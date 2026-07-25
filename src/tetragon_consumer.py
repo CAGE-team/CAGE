@@ -5,7 +5,7 @@ import queue
 import time
 import logging
 from datetime import datetime
-from src.uid_resolver import PodUIDCache, build_docker_id_map
+from src.uid_resolver import PodUIDCache, build_docker_id_map, SYSTEM_NAMESPACES
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger("tetragon-consumer")
@@ -189,12 +189,14 @@ class TetragonConsumer:
         dport = sock.get("dport", 0)
         sport = sock.get("sport", 0)
 
-        if not saddr.startswith("10.244."):
+        if saddr.startswith("127.") or saddr.startswith("::"):
             return None
 
-        if daddr.startswith("127.") or daddr.startswith("172.18.") or daddr.startswith("::"):
-            return None
-
+        # Source must resolve to a known pod IP — this is what actually does
+        # the filtering (not a hardcoded pod-CIDR prefix, which only matches
+        # whatever range this one kind cluster happens to use). Any traffic
+        # from a node/host-network process, or a CIDR this cluster wasn't
+        # tuned against, is excluded here because it simply isn't a pod.
         src_meta = self.cache.get_meta_by_ip(saddr)
         if not src_meta:
             return None
@@ -203,12 +205,20 @@ class TetragonConsumer:
         if not src_uid:
             return None
 
-        if src_meta.get("ns") in ("kube-system", "local-path-storage"):
+        if src_meta.get("ns") in SYSTEM_NAMESPACES:
             return None
 
+        # T1610 is specifically pod-to-pod lateral movement, so the
+        # destination must resolve to a known pod too — this is what used to
+        # be done (badly) by excluding a hardcoded Docker-bridge subnet.
+        # Requiring dst to resolve is cluster-CIDR-agnostic and also correctly
+        # excludes node/bridge/external traffic without needing to know any
+        # specific address range in advance.
         dst_uid = self.cache.resolve_by_ip(daddr)
         dst_meta = self.cache.get_meta(dst_uid) if dst_uid else None
-        dst_pod_name = dst_meta["name"] if dst_meta else daddr
+        if not dst_meta:
+            return None
+        dst_pod_name = dst_meta["name"]
 
         return {
             "timestamp": raw.get("time", datetime.now().isoformat()),
@@ -254,7 +264,7 @@ class TetragonConsumer:
         pod_uid, pod_name, namespace = self._resolve_uid(proc)
         if not pod_uid:
             return None
-        if namespace in ("kube-system", "local-path-storage"):
+        if namespace in SYSTEM_NAMESPACES:
             return None
 
         return {
