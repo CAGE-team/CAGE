@@ -70,9 +70,9 @@ week4/                        — evaluation: ablation study, benign controls,
                                 latency capture, scenario scripts, metrics, plots
 run_ablation.py               — fires attacks against a running server for a
                                 given ABLATION_MODE and logs fired/not-fired
+week4/run_benign_controls.py  — reproducible benign/false-positive trials,
+                                writes results_benign_v2.csv (see Evaluation)
 plot_graph2.py                — attack-vs-benign alert rate bar chart
-patch_server_v3.py            — one-off script that patched server.py's
-                                __main__ block to read ABLATION_MODE
 DEMO_GUIDE.md                  — full walkthrough for presenting the project
 ```
 
@@ -128,6 +128,28 @@ traffic. T1059/T1021/T1548 controls: 0/10 false positives. **T1610 control:
 distinguish benign pod-to-pod traffic from an attack pattern and is a known
 false-positive source, tracked as an open item below.
 
+> **Reproducibility note on the above.** `results_benign.csv` predates this
+> repo's reconciliation merge with no accompanying generation script or
+> documented commands — only the four category names and their aggregate
+> results survive. Investigating this turned up a real inconsistency:
+> `causal_graph.py`'s `_check_t1021()` has no whitelist check at all (unlike
+> `_check_t1059`/`_check_t1548_privesc`), so it fires on *every* `kubectl
+> exec` unconditionally — there's no pod, whitelisted or not, that a real
+> exec could target today and produce the documented "T1021: 0/10" result.
+> Rather than guess at the original commands, `week4/run_benign_controls.py`
+> implements a new, explicitly-documented methodology (using `legitimate-app`
+> — the one pod name on `SHELL_WHITELIST_POD_PREFIXES` — for the
+> whitelist-suppression trials, and the previously-unused `benign-worker`
+> from `week4/benign-app.yaml` for genuine sub-threshold network traffic)
+> and writes to `week4/results_benign_v2.csv`, leaving the original file
+> untouched as historical, pre-burst-threshold-fix data. A reduced-trial
+> live run confirmed it end-to-end: `T1059_whitelisted` 0/3, `T1021` 3/3
+> (expected — see above), `T1548_whitelisted` 0/3, and **`T1610` 0/3**,
+> which is the actual answer to the open item below: the burst-threshold
+> fix holds up against ordinary, non-scan-like pod-to-pod traffic. Run
+> `python3 week4/run_benign_controls.py <server-logfile>` for the full
+> 10-trial version.
+
 ## Known limitations
 
 - Single-node `kind`/docker-desktop cluster, not a multi-node production setup.
@@ -139,9 +161,16 @@ false-positive source, tracked as an open item below.
 - T1610 previously had a high false-positive rate on benign pod-to-pod
   traffic (see benign controls above, captured before this fix). The rule now
   requires a scan-like burst (5+ distinct destination pods within 10s) instead
-  of firing on a single ordinary connection, but the benign-control trials
-  above predate this change and have not yet been re-run to confirm the
-  false-positive rate in practice.
+  of firing on a single ordinary connection. Re-validated with
+  `week4/run_benign_controls.py` (see the reproducibility note above): 0/3
+  false positives on sub-threshold traffic in a live run — full 10-trial
+  confirmation still pending, tracked below.
+- T1021 (`_check_t1021` in `causal_graph.py`) has no whitelist check, unlike
+  every other shell/exec/privesc rule — it fires on any `kubectl exec` into
+  any pod, with no behavioral or pod-identity discrimination. Whether that's
+  intentional (all remote exec is inherently worth flagging) or a gap versus
+  the original design is unresolved — see the benign-controls reproducibility
+  note above.
 - 120-second correlation window — an attack chain must complete inside that
   window to be linked. Configurable.
 
@@ -153,6 +182,8 @@ false-positive source, tracked as an open item below.
 - [x] Live SOC dashboard (attack graph, alert feed, MITRE legend, sparkline)
 - [x] Container escape / privilege escalation / resource abuse / RBAC abuse detection
 - [x] Ablation study + benign controls + latency capture
-- [ ] Re-validate T1610 false-positive rate on benign traffic after burst-threshold fix
+- [x] Re-validate T1610 false-positive rate on benign traffic after burst-threshold fix
+      (0/3 in a reduced live run via `week4/run_benign_controls.py`)
+- [ ] Full 10-trial run of `week4/run_benign_controls.py` for the paper's final numbers
 - [ ] Multi-node cluster validation
 - [ ] Write-up / paper

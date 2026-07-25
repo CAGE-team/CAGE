@@ -48,6 +48,13 @@ CONNECTION_BURST_WINDOW_SECONDS = 10  # ...within this many seconds
 REMOTE_EXEC_CORRELATION_SECONDS = 10  # T1059 within this long after a T1021 is more suspicious
 
 class CausalGraph:
+    # How many events between sweeps for pod_uids with no recent activity.
+    # _event_window's per-pod list is pruned down to empty as its events
+    # age out, but the dict key itself is never removed — over a
+    # long-running deployment with pod churn (e.g. CI/CD), that and the
+    # other three per-pod structures below would grow without bound.
+    SWEEP_INTERVAL_EVENTS = 500
+
     def __init__(self):
         self._lock = threading.RLock()
         self.graph = nx.DiGraph()
@@ -56,6 +63,32 @@ class CausalGraph:
         self._fired_chains = set()
         self._exec_burst = {}       # pod_uid -> [timestamps] for fork-bomb detection
         self._conn_burst = {}       # pod_uid -> [(timestamp, dst_pod_name)] for T1610 scan detection
+        self._events_since_sweep = 0
+
+    def _sweep_stale_pods(self, current_ts):
+        """Drop tracking state for pod_uids with no events in the last
+        120s (the widest window any of these structures use, so that also
+        covers _conn_burst/_exec_burst, whose windows are both 10s). Must
+        compare against current_ts, not just check for an empty window: a
+        pod_uid's window list is only ever re-pruned when *that pod* gets
+        another event, so a pod that's genuinely gone (deleted, no more
+        events) has its list frozen at whatever it last was — it would
+        never become empty on its own. Safe to run any time: a pod_uid
+        that becomes active again just gets its entries recreated fresh
+        via the existing setdefault() calls."""
+        if current_ts is None:
+            return
+        stale_uids = set()
+        for uid, window in self._event_window.items():
+            if not window or (current_ts - window[-1][0]) >= timedelta(seconds=120):
+                stale_uids.add(uid)
+        if not stale_uids:
+            return
+        for uid in stale_uids:
+            del self._event_window[uid]
+            self._conn_burst.pop(uid, None)
+            self._exec_burst.pop(uid, None)
+        self._fired_chains = {k for k in self._fired_chains if k[0] not in stale_uids}
 
     def add_event(self, event: dict) -> list:
         with self._lock:
@@ -95,6 +128,11 @@ class CausalGraph:
             chain_alerts = self._check_chains(event, ts)
             alerts.extend(chain_alerts)
             self.alerts.extend(chain_alerts)
+
+            self._events_since_sweep += 1
+            if self._events_since_sweep >= self.SWEEP_INTERVAL_EVENTS:
+                self._events_since_sweep = 0
+                self._sweep_stale_pods(ts)
 
             return alerts
 
