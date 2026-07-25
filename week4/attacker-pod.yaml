@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: attacker
+  namespace: default
+spec:
+  containers:
+  - name: attacker
+    image: ubuntu:latest
+    # bash/su/chroot ship with the base image; curl is the one tool several
+    # attack-simulation scripts need (secret/RBAC reads via the pod's own
+    # mounted service-account token) that ubuntu:latest doesn't include.
+    command: ["bash", "-c", "apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1; sleep infinity"]
