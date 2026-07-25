@@ -398,47 +398,66 @@ class CausalGraph:
 
         alerts = []
 
+        # Chain dedup is episode-scoped, not permanent: each key stays in
+        # _fired_chains only while its legs remain continuously satisfied
+        # (suppresses repeat alerts for one ongoing incident), and is
+        # discarded the moment the condition goes false so a genuinely new,
+        # later episode on the same pod_uid can fire it again. A pod_uid is
+        # reused indefinitely across every demo/ablation/evaluation run in
+        # this project, so a permanent per-pod latch would silently make
+        # any repeated-trial chain-detection measurement undercount after
+        # the first trial.
+
         # Two-hop: T1059 → T1552
         chain_key_2 = (pod_uid, "T1059->T1552")
-        if has_t1059 and has_t1552 and chain_key_2 not in self._fired_chains:
-            self._fired_chains.add(chain_key_2)
-            log.warning(f"[CRITICAL] T1059→T1552 CHAIN on {event.get('namespace')}/{event.get('pod_name')}")
-            alerts.append({
-                "severity": "CRITICAL", "rule": "T1059→T1552",
-                "description": "Shell execution then credential access",
-                "pod_uid": pod_uid,
-                "pod_name": event.get("pod_name"),
-                "namespace": event.get("namespace"),
-                "timestamp": event.get("timestamp"),
-            })
+        if has_t1059 and has_t1552:
+            if chain_key_2 not in self._fired_chains:
+                self._fired_chains.add(chain_key_2)
+                log.warning(f"[CRITICAL] T1059→T1552 CHAIN on {event.get('namespace')}/{event.get('pod_name')}")
+                alerts.append({
+                    "severity": "CRITICAL", "rule": "T1059→T1552",
+                    "description": "Shell execution then credential access",
+                    "pod_uid": pod_uid,
+                    "pod_name": event.get("pod_name"),
+                    "namespace": event.get("namespace"),
+                    "timestamp": event.get("timestamp"),
+                })
+        else:
+            self._fired_chains.discard(chain_key_2)
 
         # Three-hop: T1021 → T1059 → T1552
         chain_key_3 = (pod_uid, "T1021->T1059->T1552")
-        if has_t1021 and has_t1059 and has_t1552 and chain_key_3 not in self._fired_chains:
-            self._fired_chains.add(chain_key_3)
-            log.warning(f"[CRITICAL] T1021→T1059→T1552 FULL CHAIN on {event.get('namespace')}/{event.get('pod_name')}")
-            alerts.append({
-                "severity": "CRITICAL", "rule": "T1021→T1059→T1552",
-                "description": "Full lateral movement chain: remote exec + shell + credential access",
-                "pod_uid": pod_uid,
-                "pod_name": event.get("pod_name"),
-                "namespace": event.get("namespace"),
-                "timestamp": event.get("timestamp"),
-            })
+        if has_t1021 and has_t1059 and has_t1552:
+            if chain_key_3 not in self._fired_chains:
+                self._fired_chains.add(chain_key_3)
+                log.warning(f"[CRITICAL] T1021→T1059→T1552 FULL CHAIN on {event.get('namespace')}/{event.get('pod_name')}")
+                alerts.append({
+                    "severity": "CRITICAL", "rule": "T1021→T1059→T1552",
+                    "description": "Full lateral movement chain: remote exec + shell + credential access",
+                    "pod_uid": pod_uid,
+                    "pod_name": event.get("pod_name"),
+                    "namespace": event.get("namespace"),
+                    "timestamp": event.get("timestamp"),
+                })
+        else:
+            self._fired_chains.discard(chain_key_3)
 
         # Four-hop: T1059 → T1610 → T1552 (new — network lateral movement)
         chain_key_4 = (pod_uid, "T1059->T1610->T1552")
-        if has_t1059 and has_t1610 and has_t1552 and chain_key_4 not in self._fired_chains:
-            self._fired_chains.add(chain_key_4)
-            log.warning(f"[CRITICAL] T1059→T1610→T1552 NETWORK CHAIN on {event.get('namespace')}/{event.get('pod_name')}")
-            alerts.append({
-                "severity": "CRITICAL", "rule": "T1059→T1610→T1552",
-                "description": "Shell → lateral network connection → secret access (eBPF network telemetry)",
-                "pod_uid": pod_uid,
-                "pod_name": event.get("pod_name"),
-                "namespace": event.get("namespace"),
-                "timestamp": event.get("timestamp"),
-            })
+        if has_t1059 and has_t1610 and has_t1552:
+            if chain_key_4 not in self._fired_chains:
+                self._fired_chains.add(chain_key_4)
+                log.warning(f"[CRITICAL] T1059→T1610→T1552 NETWORK CHAIN on {event.get('namespace')}/{event.get('pod_name')}")
+                alerts.append({
+                    "severity": "CRITICAL", "rule": "T1059→T1610→T1552",
+                    "description": "Shell → lateral network connection → secret access (eBPF network telemetry)",
+                    "pod_uid": pod_uid,
+                    "pod_name": event.get("pod_name"),
+                    "namespace": event.get("namespace"),
+                    "timestamp": event.get("timestamp"),
+                })
+        else:
+            self._fired_chains.discard(chain_key_4)
 
         has_t1611 = bool(binaries & ESCAPE_BINARIES) or any(
             any(ind in (e.get("arguments") or "") for ind in ESCAPE_ARG_INDICATORS)
@@ -448,29 +467,35 @@ class CausalGraph:
 
         # Escalation chain: shell -> privilege escalation -> container escape
         chain_key_5 = (pod_uid, "T1059->T1548->T1611")
-        if has_t1059 and has_t1548 and has_t1611 and chain_key_5 not in self._fired_chains:
-            self._fired_chains.add(chain_key_5)
-            log.warning(f"[CRITICAL] T1059→T1548→T1611 ESCALATION CHAIN on "
-                        f"{event.get('namespace')}/{event.get('pod_name')}")
-            alerts.append({
-                "severity": "CRITICAL", "rule": "T1059->T1548->T1611",
-                "description": "Shell access, privilege escalation, then container escape attempt",
-                "pod_uid": pod_uid, "pod_name": event.get("pod_name"),
-                "namespace": event.get("namespace"), "timestamp": event.get("timestamp"),
-            })
+        if has_t1059 and has_t1548 and has_t1611:
+            if chain_key_5 not in self._fired_chains:
+                self._fired_chains.add(chain_key_5)
+                log.warning(f"[CRITICAL] T1059→T1548→T1611 ESCALATION CHAIN on "
+                            f"{event.get('namespace')}/{event.get('pod_name')}")
+                alerts.append({
+                    "severity": "CRITICAL", "rule": "T1059->T1548->T1611",
+                    "description": "Shell access, privilege escalation, then container escape attempt",
+                    "pod_uid": pod_uid, "pod_name": event.get("pod_name"),
+                    "namespace": event.get("namespace"), "timestamp": event.get("timestamp"),
+                })
+        else:
+            self._fired_chains.discard(chain_key_5)
 
         # Breakout chain: container escape -> credential theft on the node
         chain_key_6 = (pod_uid, "T1611->T1552")
-        if has_t1611 and has_t1552 and chain_key_6 not in self._fired_chains:
-            self._fired_chains.add(chain_key_6)
-            log.warning(f"[CRITICAL] T1611→T1552 BREAKOUT CHAIN on "
-                        f"{event.get('namespace')}/{event.get('pod_name')}")
-            alerts.append({
-                "severity": "CRITICAL", "rule": "T1611->T1552",
-                "description": "Container escape indicator followed by credential access",
-                "pod_uid": pod_uid, "pod_name": event.get("pod_name"),
-                "namespace": event.get("namespace"), "timestamp": event.get("timestamp"),
-            })
+        if has_t1611 and has_t1552:
+            if chain_key_6 not in self._fired_chains:
+                self._fired_chains.add(chain_key_6)
+                log.warning(f"[CRITICAL] T1611→T1552 BREAKOUT CHAIN on "
+                            f"{event.get('namespace')}/{event.get('pod_name')}")
+                alerts.append({
+                    "severity": "CRITICAL", "rule": "T1611->T1552",
+                    "description": "Container escape indicator followed by credential access",
+                    "pod_uid": pod_uid, "pod_name": event.get("pod_name"),
+                    "namespace": event.get("namespace"), "timestamp": event.get("timestamp"),
+                })
+        else:
+            self._fired_chains.discard(chain_key_6)
 
         return alerts
 
