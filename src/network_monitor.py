@@ -16,11 +16,17 @@ def hex_to_ip(hex_str):
 def hex_to_port(hex_str):
     return int(hex_str, 16)
 
-def read_proc_net_tcp(pod_name):
+# Namespaces excluded from auto-discovered monitoring: constant churn from
+# system components (kube-proxy, coredns, kindnet, ...) with no attack-
+# detection value — causal_graph.py's own SHELL_WHITELIST_NAMESPACES
+# excludes the same two for the same reason.
+SYSTEM_NAMESPACES = {"kube-system", "local-path-storage"}
+
+def read_proc_net_tcp(namespace, pod_name):
     """Read /proc/net/tcp from inside a pod via kubectl exec"""
     try:
         result = subprocess.run(
-            ["kubectl", "exec", pod_name, "--", "cat", "/proc/net/tcp"],
+            ["kubectl", "exec", "-n", namespace, pod_name, "--", "cat", "/proc/net/tcp"],
             capture_output=True, text=True, timeout=5
         )
         return result.stdout
@@ -57,47 +63,59 @@ class NetworkMonitor:
         self._seen = set()  # avoid duplicate events
 
     def start(self, pods_to_monitor=None):
-        self._pods = pods_to_monitor or ["attacker"]
+        # List of (namespace, pod_name) pairs. If not given explicitly,
+        # watch every pod currently known to the UID cache outside the
+        # noisy system namespaces — not just one hardcoded pod name, so
+        # lateral movement is observable from any compromised workload,
+        # not only from a pod literally named "attacker".
+        if pods_to_monitor is not None:
+            self._pods = pods_to_monitor
+        else:
+            self._pods = [
+                (meta["ns"], meta["name"])
+                for meta in self.cache.snapshot().values()
+                if meta.get("ns") not in SYSTEM_NAMESPACES
+            ]
         t = threading.Thread(target=self._loop, daemon=True)
         t.start()
         log.info(f"Network monitor started, watching pods: {self._pods}")
 
     def _loop(self):
         while True:
-            for pod_name in self._pods:
+            for namespace, pod_name in self._pods:
                 try:
-                    self._check_pod(pod_name)
+                    self._check_pod(namespace, pod_name)
                 except Exception as e:
-                    log.warning(f"Error checking {pod_name}: {e}")
+                    log.warning(f"Error checking {namespace}/{pod_name}: {e}")
             time.sleep(self.poll_interval)
 
-    def _check_pod(self, pod_name):
-        raw = read_proc_net_tcp(pod_name)
+    def _check_pod(self, namespace, pod_name):
+        raw = read_proc_net_tcp(namespace, pod_name)
         if not raw:
             return
 
         conns = parse_tcp_connections(raw)
         for conn in conns:
             remote_ip = conn["remote_ip"]
-            
+
             # Skip loopback and kubernetes API server
             if remote_ip.startswith("127.") or remote_ip == "10.96.0.1":
                 continue
 
             # Look up source pod UID
-            src_uid = self.cache.resolve_by_name("default", pod_name)
-            
+            src_uid = self.cache.resolve_by_name(namespace, pod_name)
+
             # Look up destination pod UID
             dst_uid = self.cache.resolve_by_ip(remote_ip)
             dst_meta = self.cache.get_meta(dst_uid) if dst_uid else None
             dst_name = dst_meta["name"] if dst_meta else remote_ip
 
-            key = (pod_name, remote_ip, conn["remote_port"])
+            key = (namespace, pod_name, remote_ip, conn["remote_port"])
             if key in self._seen:
                 continue
             self._seen.add(key)
 
-            log.info(f"[NET] {pod_name} -> {dst_name} ({remote_ip}:{conn['remote_port']})")
+            log.info(f"[NET] {namespace}/{pod_name} -> {dst_name} ({remote_ip}:{conn['remote_port']})")
 
             self.out_queue.put({
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -108,7 +126,7 @@ class NetworkMonitor:
                 "dst_port": conn["remote_port"],
                 "dst_pod": dst_name,
                 "dst_uid": dst_uid,
-                "namespace": "default",
+                "namespace": namespace,
                 "pod_uid": src_uid,
                 "pod_name": pod_name,
             })
@@ -124,7 +142,7 @@ if __name__ == "__main__":
 
     q = queue.Queue()
     monitor = NetworkMonitor(cache, q)
-    monitor.start(pods_to_monitor=["attacker"])
+    monitor.start(pods_to_monitor=[("default", "attacker")])
 
     # Make attacker connect to victim
     VICTIM_IP = "10.244.2.4"

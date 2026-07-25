@@ -12,7 +12,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.correlator import Correlator
 
 app = Flask(__name__, static_folder='../dashboard')
-CORS(app)
+# The dashboard is served by this same app at http://localhost:5000 (see
+# dashboard/index.html's BASE constant), so its own fetches are same-origin
+# and don't need CORS at all. Restricting to just that origin (rather than
+# flask_cors's unrestricted default) stops any other page the operator's
+# browser has open from reading /api/*, /stream/* cross-origin.
+CORS(app, origins=["http://localhost:5000", "http://127.0.0.1:5000"])
 
 # Global correlator instance
 correlator = Correlator()
@@ -392,4 +397,9 @@ if __name__ == '__main__':
     # Start correlator loop in background
     threading.Thread(target=correlator_loop, daemon=True).start()
     print("CAGE server running at http://localhost:5000")
-    app.run(host='0.0.0.0', port=5000, threaded=True)
+    # Loopback-only: DEMO_GUIDE.md's own instructions are "open
+    # http://localhost:5000", and this is an unauthenticated dev server
+    # (Flask says so itself on every start) with no case in this repo for
+    # remote/LAN access. 0.0.0.0 would additionally expose it on the host's
+    # real network interfaces, not just this machine.
+    app.run(host='127.0.0.1', port=5000, threaded=True)

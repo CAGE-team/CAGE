@@ -36,15 +36,43 @@ COLOR_MAP = {
     "false_positive": "#fde725", # yellow - warning / known limitation
 }
 
+# results_personA_v2.csv is populated by the interactive capture_latency.py
+# tool, which only writes a row on a *successful* detection — a missed or
+# timed-out trial is silently "not recorded" (see capture_latency.py). That
+# means this file can only ever tell us how many trials succeeded, never
+# how many were actually attempted. The methodology assumes exactly this
+# many trials were run per technique; that can't be verified from the file
+# alone, so any mismatch is surfaced loudly below instead of silently
+# producing a wrong percentage.
+EXPECTED_TRIALS_PER_TECHNIQUE = 10
+
 def load_attack_rates(path):
-    """Each row = one fired trial. Alert rate = rows_seen / 10 expected trials."""
+    """Each row = one successfully detected trial. Alert rate = rows_seen /
+    EXPECTED_TRIALS_PER_TECHNIQUE — see the constant's comment above for why
+    that denominator can't be derived from the file itself."""
     counts = defaultdict(int)
     with open(path) as f:
         reader = csv.DictReader(f)
         for row in reader:
             counts[row["technique"]] += 1
-    # all attack techniques ran 10 trials each
-    return {tech: (n / 10.0) * 100 for tech, n in counts.items()}
+
+    for tech, n in counts.items():
+        if n > EXPECTED_TRIALS_PER_TECHNIQUE:
+            raise ValueError(
+                f"{path}: {n} successful rows recorded for {tech}, more than "
+                f"the expected {EXPECTED_TRIALS_PER_TECHNIQUE} trials — data "
+                f"looks corrupted or mixed from multiple runs."
+            )
+        if n < EXPECTED_TRIALS_PER_TECHNIQUE:
+            print(f"WARNING: {tech} has only {n}/{EXPECTED_TRIALS_PER_TECHNIQUE} successful "
+                  f"rows in {path}. This will be plotted as {n}/{EXPECTED_TRIALS_PER_TECHNIQUE} = "
+                  f"{(n / EXPECTED_TRIALS_PER_TECHNIQUE) * 100:.0f}%, which assumes exactly "
+                  f"{EXPECTED_TRIALS_PER_TECHNIQUE} trials were attempted for {tech} — "
+                  f"capture_latency.py doesn't record timed-out trials, so that assumption "
+                  f"can't be checked from the file alone. Confirm the actual trial count "
+                  f"before trusting this number.")
+
+    return {tech: (n / EXPECTED_TRIALS_PER_TECHNIQUE) * 100 for tech, n in counts.items()}
 
 def load_benign_rates(path):
     """Each row = one trial with a 0/1 fire count in the last column."""
