@@ -119,6 +119,22 @@ Detection rate: 100%
 Precision: 100% (zero false positives)
 Avg detection latency: ~7s (cold start), ~4.7s steady state
 
+> **Caveat (2026-07-25):** a later live measurement of the Tetragon
+> `kubectl exec`/`tetra getevents` delivery pipe found it can lag up to
+> ~28-30s under this environment's conditions — well above the ~7s figure
+> above. Root-caused: it's connection-age-dependent — a freshly-opened
+> `tetra getevents` connection delivers in well under a second, but the
+> same command on a connection that's been open ~30+ seconds delivers the
+> same kind of event ~30s late, confirmed via the event's own
+> Tetragon-embedded capture timestamp (fast) vs. when the line actually
+> became readable (slow). Not caused by CAGE's own code, kube-system event
+> noise, or node-routing — see README.md's Evaluation section for the full
+> investigation. `run_ablation.py` and `capture_latency.py`'s
+> detection-wait windows were widened from 15s/30s to 60s to stop this
+> from silently corrupting results as false negatives. **Re-measure this
+> figure fresh before citing it in the paper — it may not hold in whatever
+> environment produces the final numbers.**
+
 ---
 
 ## WHAT MAKES CAGE UNIQUE
@@ -167,7 +183,11 @@ Avg detection latency: ~7s (cold start), ~4.7s steady state
 │   ├── correlator.py        — Orchestrator (ties everything together)
 │   └── server.py            — Flask API + SSE streaming backend
 ├── dashboard/
-│   └── index.html           — Live SOC dashboard (canvas graph)
+│   ├── index.html           — Multi-page dashboard shell (sidebar nav):
+│   │                          Overview, Attack Graph, Alerts, Chains,
+│   │                          MITRE Matrix, Pods, Timeline, Health
+│   └── app.js               — Dashboard logic (canvas graph, alert
+│                               table, Health page via /api/health)
 ├── k8s/
 │   └── tcp-connect-policy.yaml — Tetragon TracingPolicy for T1610
 └── DEMO_GUIDE.md            — This file
@@ -304,12 +324,23 @@ telemetry sources are active and streaming.
 **Chain banner:** Fires when a full attack chain is detected.
 Shows the MITRE technique sequence.
 
-**Metrics bar:**
+**Metrics bar (Overview page):**
 - CRITICAL = full multi-hop chains detected
 - HIGH = individual high-severity events (secret access)
 - MEDIUM = individual technique detections
-- FALSE POSITIVES = always 0 (our precision)
+- COVERAGE = techniques fired this session out of 11 documented (live,
+  computed from actual alerts — this replaced an earlier static "False
+  Positives: always 0" tile that displayed a fixed number rather than
+  anything measured live)
 - PODS TRACKED = live pod inventory size
+
+**Other pages (sidebar):** Attack Graph (full-screen version of the same
+graph), Alerts (filterable/sortable/searchable table with CSV export),
+Chains (all 5 documented CRITICAL chains with live fire counts), MITRE
+Matrix, Pods (per-pod detail/timeline), Timeline (chronological alert
+view), Health (live per-source status from `/api/health` — this is the
+page that would have caught a silent audit-log-consumer failure instead
+of it going unnoticed).
 
 **Attack graph (center):**
 - kubectl-admin (purple diamond) = external attacker

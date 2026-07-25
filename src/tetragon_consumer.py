@@ -304,6 +304,19 @@ class TetragonConsumer:
                     })
             return None
 
+        # Drop cluster-infrastructure noise here, at the source, instead of
+        # only in causal_graph.py's per-rule _is_whitelisted() checks. Every
+        # process_exec from every pod in the cluster reaches this function —
+        # kube-proxy alone re-syncs iptables constantly — and letting all of
+        # it through to be queued, dequeued, and run through all ten
+        # causal-graph rule checks before being discarded costs real
+        # processing time on events that can never produce an alert either
+        # way. In a live measurement, kube-system accounted for 77% of total
+        # event volume on an otherwise-idle cluster. _tag_network_event and
+        # _tag_capability_event already filter this early; this one didn't.
+        if namespace in SYSTEM_NAMESPACES:
+            return None
+
         return {
             "timestamp": raw.get("time", datetime.now().isoformat()),
             "event_type": "process_exec",
@@ -326,6 +339,8 @@ class TetragonConsumer:
             still_pending = []
             for entry in pending:
                 pod_uid, pod_name, namespace = self._resolve_uid(entry["proc"])
+                if pod_uid and namespace in SYSTEM_NAMESPACES:
+                    continue
                 if pod_uid:
                     tagged = {
                         "timestamp": entry["raw_time"],

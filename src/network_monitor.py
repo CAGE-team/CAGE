@@ -5,6 +5,7 @@ import logging
 import time
 import socket
 import struct
+from concurrent.futures import ThreadPoolExecutor
 from src.uid_resolver import SYSTEM_NAMESPACES
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -56,6 +57,7 @@ class NetworkMonitor:
         self.out_queue = out_queue
         self.poll_interval = poll_interval
         self._seen = set()  # avoid duplicate events
+        self._seen_lock = threading.Lock()
         self._api_server_ip = self._resolve_api_server_ip()
 
     def _resolve_api_server_ip(self):
@@ -95,13 +97,28 @@ class NetworkMonitor:
         log.info(f"Network monitor started, watching pods: {self._pods}")
 
     def _loop(self):
-        while True:
-            for namespace, pod_name in self._pods:
-                try:
-                    self._check_pod(namespace, pod_name)
-                except Exception as e:
-                    log.warning(f"Error checking {namespace}/{pod_name}: {e}")
-            time.sleep(self.poll_interval)
+        # Checking pods sequentially (one kubectl exec at a time) meant a
+        # full sweep's wall-clock time grew with the number of monitored
+        # pods — with enough pods, the time between two checks of the SAME
+        # pod exceeded CONNECTION_BURST_WINDOW_SECONDS (10s) in
+        # causal_graph.py, so a genuine 5-distinct-destination scan burst
+        # got split across separate sweeps and T1610 could never fire no
+        # matter how long the connections were held open. A thread pool
+        # keeps one sweep's duration close to poll_interval regardless of
+        # how many pods are being watched.
+        with ThreadPoolExecutor(max_workers=max(1, len(self._pods) or 1)) as pool:
+            while True:
+                futures = {
+                    pool.submit(self._check_pod, namespace, pod_name): (namespace, pod_name)
+                    for namespace, pod_name in self._pods
+                }
+                for future in futures:
+                    namespace, pod_name = futures[future]
+                    try:
+                        future.result()
+                    except Exception as e:
+                        log.warning(f"Error checking {namespace}/{pod_name}: {e}")
+                time.sleep(self.poll_interval)
 
     def _check_pod(self, namespace, pod_name):
         raw = read_proc_net_tcp(namespace, pod_name)
@@ -127,9 +144,10 @@ class NetworkMonitor:
             dst_name = dst_meta["name"] if dst_meta else remote_ip
 
             key = (namespace, pod_name, remote_ip, conn["remote_port"])
-            if key in self._seen:
-                continue
-            self._seen.add(key)
+            with self._seen_lock:
+                if key in self._seen:
+                    continue
+                self._seen.add(key)
 
             log.info(f"[NET] {namespace}/{pod_name} -> {dst_name} ({remote_ip}:{conn['remote_port']})")
 
@@ -140,8 +158,14 @@ class NetworkMonitor:
                 "src_uid": src_uid,
                 "dst_ip": remote_ip,
                 "dst_port": conn["remote_port"],
-                "dst_pod": dst_name,
-                "dst_uid": dst_uid,
+                # Field names must match what causal_graph.py's _check_t1610
+                # reads (dst_pod_name / dst_pod_uid) — tetragon_consumer.py's
+                # own network_connect producer already uses these names;
+                # this one didn't, so every event NetworkMonitor ever
+                # produced was silently rejected by the T1610 rule
+                # (event.get("dst_pod_name", "") was always "" here).
+                "dst_pod_name": dst_name,
+                "dst_pod_uid": dst_uid,
                 "namespace": namespace,
                 "pod_uid": src_uid,
                 "pod_name": pod_name,
@@ -173,8 +197,8 @@ if __name__ == "__main__":
     while time.time() - start < 30:
         try:
             ev = q.get(timeout=1)
-            print(f"\n[T1021 DETECTED] {ev['src_pod']} -> {ev['dst_pod']} on port {ev['dst_port']}")
+            print(f"\n[T1021 DETECTED] {ev['src_pod']} -> {ev['dst_pod_name']} on port {ev['dst_port']}")
             print(f"  src_uid={ev['src_uid']}")
-            print(f"  dst_uid={ev['dst_uid']}")
+            print(f"  dst_uid={ev['dst_pod_uid']}")
         except queue.Empty:
             pass

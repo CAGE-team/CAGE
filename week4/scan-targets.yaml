@@ -15,5 +15,4 @@ spec:
     spec:
       containers:
       - name: target
-        image: ubuntu:latest
-        command: ["sleep", "infinity"]
+        image: nginx:alpine

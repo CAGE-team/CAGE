@@ -56,11 +56,18 @@ src/
 ├── network_monitor.py      — pod-to-pod TCP connection tracking (T1610)
 ├── causal_graph.py         — detection rules + chain correlation engine
 ├── correlator.py           — orchestrator wiring sources → causal graph
-└── server.py               — Flask API + SSE streaming backend
+└── server.py               — Flask API + SSE streaming backend, incl.
+                               GET /api/health (per-source last-seen event
+                               timestamp, event count, subprocess liveness —
+                               observability only, doesn't touch detection)
 
 dashboard/
-└── index.html               — live canvas-based attack graph, alert feed,
-                                MITRE legend, severity sparkline, pod inventory
+├── index.html               — multi-page dashboard shell (sidebar nav, hash
+│                               routing): Overview, Attack Graph, Alerts,
+│                               Chains, MITRE Matrix, Pods, Timeline, Health
+└── app.js                   — dashboard logic: canvas attack graph, alert
+                                feed/table, chain history, sparkline, and
+                                the Health page (reads GET /api/health below)
 
 k8s/
 ├── tcp-connect-policy.yaml       — Tetragon TracingPolicy for T1610
@@ -136,7 +143,36 @@ false-positive source, tracked as an open item below.
 > `week4/results_benign_v2.csv`, leaving the original file untouched as
 > historical, pre-whitelist-removal data.
 >
-> **Update (2026-07-25):** a later change removed `causal_graph.py`'s
+> **Update (2026-07-25, latency root cause):** a follow-up investigation
+> localized the ~28s Tetragon delivery lag (referenced above) precisely:
+> it is **connection-age-dependent, not caused by CAGE's own code.**
+> Redirecting `kubectl exec -n kube-system ds/tetragon -c tetragon --
+> tetra getevents` straight to a file (bypassing tetragon_consumer.py
+> entirely) delivered an event in ~150ms on a connection open only 3
+> seconds — but the *identical* command, left running 35 seconds before
+> firing the same attack, delivered the same kind of event ~30s late. The
+> event's own Tetragon-embedded capture timestamp confirmed the eBPF
+> capture itself was fast (~3.5s) — the ~30s gap was entirely between
+> capture and the line becoming visible in `tetra getevents`' own stdout.
+> This rules out kube-system event-volume noise (also tested and fixed
+> separately — `tetragon_consumer.py`'s `_tag_event()` now filters
+> `SYSTEM_NAMESPACES` at the source instead of only in
+> `causal_graph.py`'s rule checks, cutting total event volume by ~77% on
+> an idle cluster — but this did not change the latency), node/daemonset-pod
+> routing mismatches (checked directly), and Python-side processing. It
+> points to periodic output buffering inside `tetra getevents` itself that
+> only manifests once the connection has been open a while — `tetra`
+> exposes no CLI flag to control this, and `stdbuf` cannot help (it
+> intercepts glibc's buffering, but `tetra` is a Go binary with its own
+> internal I/O). A concrete, not-yet-implemented follow-up: periodically
+> cycling `tetragon_consumer.py`'s subprocess connection (e.g. every ~20s,
+> before it ages into the slow regime) instead of holding one connection
+> open indefinitely — untested here due to the risk of event loss/
+> duplication across a reconnect without further validation budget. The
+> 60s eval-script timeouts (below) are a safe mitigation regardless of
+> whether that follow-up is ever implemented.
+>
+> **Update (2026-07-25, whitelist removal):** a later change removed `causal_graph.py`'s
 > pod-name-based whitelist entirely (it was a real detection bypass — an
 > attacker could name their own pod `legitimate-app-evil` and evade
 > T1059/T1611/T1548/T1496/T1499 detection outright). Scope exclusion is now
@@ -170,6 +206,32 @@ false-positive source, tracked as an open item below.
   of firing on a single ordinary connection. Re-validated with
   `week4/run_benign_controls.py` (see the reproducibility note above) — full
   10-trial confirmation still pending, tracked below.
+- **T1610's poll-based detection path (`NetworkMonitor`) was silently
+  non-functional until 2026-07-25.** Three independent bugs, found while
+  investigating why a working T1610 burst wasn't firing: (1)
+  `week4/scan-targets.yaml` — the manifest documented in `DEMO_GUIDE.md`
+  for provisioning T1610 demo targets — deployed plain `ubuntu:latest`
+  pods running `sleep infinity`, nothing listening on any port, so every
+  demo attempt following the actual documented setup failed with
+  connection-refused; fixed to `nginx:alpine`. (2) `NetworkMonitor`
+  checked its monitored pods sequentially, one `kubectl exec` at a time —
+  with enough pods, a full sweep's wall-clock time exceeded
+  `CONNECTION_BURST_WINDOW_SECONDS` (10s), so a genuine 5-destination
+  burst got split across separate sweeps and could never satisfy the
+  threshold no matter how long connections were held open; fixed to
+  check all monitored pods concurrently via a thread pool, keeping sweep
+  time close to `poll_interval` regardless of pod count. (3) — the root
+  cause once (1) and (2) were fixed and it *still* didn't fire —
+  `NetworkMonitor`'s event dict used the field names `dst_pod`/`dst_uid`,
+  but `causal_graph.py`'s `_check_t1610` reads `dst_pod_name`/
+  `dst_pod_uid` (the names `tetragon_consumer.py`'s own network-event
+  producer already used correctly); every event `NetworkMonitor` ever
+  produced was silently rejected by the rule. All three verified live: a
+  5-pod burst now fires T1610 on the first attempt. This does not affect
+  T1610 detections via Tetragon's `tcp_connect` kprobe path
+  (`tetragon_consumer.py`), which uses the correct field names and was
+  not affected — `NetworkMonitor` exists as a second, independent
+  detection path for the same technique.
 - T1021 (`_check_t1021` in `causal_graph.py`) is the one rule with no scope
   exclusion at all — not even the namespace-level check every other
   behavioral rule has (`_is_whitelisted`, namespace-only since the pod-name
