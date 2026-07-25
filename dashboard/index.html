@@ -289,6 +289,16 @@ body{background:var(--bg);color:var(--text);font-family:'SF Mono','Fira Code',mo
 </div>
 <script>
 const BASE = 'http://localhost:5000';
+
+// Alert/event fields (RBAC subject names, exec'd binary paths, etc.) can
+// contain attacker-controlled text that Kubernetes itself never validates
+// as safe HTML. Every value interpolated into innerHTML below must go
+// through this first.
+function esc(s){
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
 setInterval(() => { document.getElementById('clock').textContent = new Date().toTimeString().slice(0,8); }, 1000);
 
 let gNodes=[], gEdges=[], alerts=[], evtCount=0, evtMinBucket=0, animPaused=false, selPod=null;
@@ -798,7 +808,7 @@ function renderChainHistory(){
       <div class="ch-steps">${steps.map((s,i)=>
         `<span class="chain-step ${chainStepClass(s)}" title="${MITRE_DESC[s]||''}">${s}</span>${i<steps.length-1?'<span class="ch-arrow">→</span>':''}`
       ).join('')}</div>
-      <div class="ch-meta"><span class="ch-pod"><span class="pod-dot" style="background:${dotColor}"></span>${c.pod}</span><span>${c.ts}</span></div>`;
+      <div class="ch-meta"><span class="ch-pod"><span class="pod-dot" style="background:${dotColor}"></span>${esc(c.pod)}</span><span>${esc(c.ts)}</span></div>`;
     el.appendChild(div);
   });
 }
@@ -879,7 +889,7 @@ function populateKcPodSelect(){
   const prev=sel.value;
   const withAlerts=gNodes.filter(n=>n.alert_count>0 && n.uid!=='admin' && n.uid!=='host' && !(n.uid||'').startsWith('rbac:'));
   const options=withAlerts.length?withAlerts:gNodes.filter(n=>n.name==='attacker');
-  sel.innerHTML=options.map(n=>`<option value="${n.name}">${n.namespace}/${n.name}</option>`).join('');
+  sel.innerHTML=options.map(n=>`<option value="${esc(n.name)}">${esc(n.namespace)}/${esc(n.name)}</option>`).join('');
   if(prev && options.some(n=>n.name===prev)) sel.value=prev;
   renderKillChain(sel.value||(options[0]&&options[0].name)||'attacker');
 }
@@ -963,11 +973,11 @@ function renderPodList(nodes){
       ?`<div class="badge ${node.severity==='critical'?'crit':node.severity==='high'?'high':'med'}">${node.severity.toUpperCase()}</div>`
       :`<div class="badge ok">CLEAN</div>`;
     div.innerHTML=`
-      <div class="pi-icon" style="background:${color}22;color:${color}">${podInitials(node.name)}</div>
+      <div class="pi-icon" style="background:${color}22;color:${color}">${esc(podInitials(node.name))}</div>
       <div class="pi-info">
-        <div class="pi-name">${node.name}</div>
-        <div class="pi-ns">${node.namespace}</div>
-        <div class="pi-uid">${(node.uid||'').slice(0,18)}…</div>
+        <div class="pi-name">${esc(node.name)}</div>
+        <div class="pi-ns">${esc(node.namespace)}</div>
+        <div class="pi-uid">${esc((node.uid||'').slice(0,18))}…</div>
       </div>
       <div class="pi-badges">${badgesHtml}${node.alert_count>0?`<div class="badge info">${node.alert_count} alerts</div>`:''}</div>
     `;
@@ -979,10 +989,10 @@ function renderPodList(nodes){
         exp.innerHTML=`<div class="pe-row"><span class="pe-label">Status</span><span class="pe-val">No alerts recorded for this pod</span></div>`;
       } else {
         exp.innerHTML=`
-          <div class="pe-row"><span class="pe-label">First Seen</span><span class="pe-val">${stats.first.rule} @ ${stats.first.timestamp?new Date(stats.first.timestamp).toTimeString().slice(0,8):'—'}</span></div>
-          <div class="pe-row"><span class="pe-label">Last Seen</span><span class="pe-val">${stats.last.rule} @ ${stats.last.timestamp?new Date(stats.last.timestamp).toTimeString().slice(0,8):'—'}</span></div>
+          <div class="pe-row"><span class="pe-label">First Seen</span><span class="pe-val">${esc(stats.first.rule)} @ ${stats.first.timestamp?new Date(stats.first.timestamp).toTimeString().slice(0,8):'—'}</span></div>
+          <div class="pe-row"><span class="pe-label">Last Seen</span><span class="pe-val">${esc(stats.last.rule)} @ ${stats.last.timestamp?new Date(stats.last.timestamp).toTimeString().slice(0,8):'—'}</span></div>
           <div class="pe-row"><span class="pe-label">Total Alerts</span><span class="pe-val">${stats.count}</span></div>
-          <div class="pe-row"><span class="pe-label">Techniques</span><div class="pe-techs">${stats.techs.map(t=>`<span class="pe-tech" title="${MITRE_DESC[t]||''}">${t}</span>`).join('')}</div></div>
+          <div class="pe-row"><span class="pe-label">Techniques</span><div class="pe-techs">${stats.techs.map(t=>`<span class="pe-tech" title="${esc(MITRE_DESC[t]||'')}">${esc(t)}</span>`).join('')}</div></div>
         `;
       }
       list.appendChild(exp);
@@ -1031,12 +1041,12 @@ function makeAlertEl(a){
   const podKey=(a.namespace||'')+'/'+(a.pod_name||'');
   const dotColor=a.pod_name?podColor(podKey):'#475569';
   el.innerHTML=`
-    <div class="at"><span class="asev">${a.severity}</span><span class="arule" title="${ruleTitle(a.rule)}">${a.rule}</span><span class="atime">${ts}</span></div>
-    <div class="adesc">${a.description||''}</div>
+    <div class="at"><span class="asev">${esc(a.severity)}</span><span class="arule" title="${esc(ruleTitle(a.rule))}">${esc(a.rule)}</span><span class="atime">${ts}</span></div>
+    <div class="adesc">${esc(a.description||'')}</div>
     <div class="ameta">
-      <span class="atag"><span class="pod-dot" style="background:${dotColor}"></span>${a.namespace||''}/${a.pod_name||''}</span>
-      ${a.binary?`<span class="atag">${a.binary}</span>`:''}
-      ${a.secret_name?`<span class="atag">secret:${a.secret_name}</span>`:''}
+      <span class="atag"><span class="pod-dot" style="background:${dotColor}"></span>${esc(a.namespace||'')}/${esc(a.pod_name||'')}</span>
+      ${a.binary?`<span class="atag">${esc(a.binary)}</span>`:''}
+      ${a.secret_name?`<span class="atag">secret:${esc(a.secret_name)}</span>`:''}
     </div>`;
   return el;
 }
@@ -1053,7 +1063,7 @@ function prependEvent(ev){
   else if(ev.event_type==='k8s_secret_access') body=`secret ${ev.verb} by ${ev.user||''}`;
   else if(ev.event_type==='pod_exec') body=`kubectl exec → ${ev.target_pod||''} by ${ev.user||''}`;
   else body=JSON.stringify(ev).slice(0,60);
-  el.innerHTML=`<span class="et">${ts}</span><span class="ek ${ev.event_type}">${label}</span><span class="eb"><span class="ep">${ev.pod_name||ev.namespace||''}</span> · <span class="ebn">${body}</span></span>`;
+  el.innerHTML=`<span class="et">${ts}</span><span class="ek ${ev.event_type}">${esc(label)}</span><span class="eb"><span class="ep">${esc(ev.pod_name||ev.namespace||'')}</span> · <span class="ebn">${esc(body)}</span></span>`;
   stream.insertBefore(el,stream.firstChild);
   setTimeout(()=>el.style.background='',500);
   while(stream.children.length>200) stream.removeChild(stream.lastChild);

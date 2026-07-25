@@ -79,6 +79,7 @@ class CausalGraph:
                         namespace=event.get("namespace"))
 
             # Update sliding event window
+            ts = None
             if pod_uid and event.get("timestamp"):
                 try:
                     ts = datetime.fromisoformat(
@@ -89,9 +90,9 @@ class CausalGraph:
                         if (ts - t) < timedelta(seconds=120)
                     ]
                 except Exception:
-                    pass
+                    ts = None
 
-            chain_alerts = self._check_chains(event)
+            chain_alerts = self._check_chains(event, ts)
             alerts.extend(chain_alerts)
             self.alerts.extend(chain_alerts)
 
@@ -366,7 +367,7 @@ class CausalGraph:
             "timestamp": event.get("timestamp"),
         }
 
-    def _check_chains(self, event) -> list:
+    def _check_chains(self, event, ts=None) -> list:
         pod_uid = event.get("pod_uid")
         if not pod_uid or pod_uid not in self._event_window:
             return []
@@ -378,9 +379,22 @@ class CausalGraph:
         has_t1059 = bool(binaries & {"/bin/bash", "/bin/sh", "/usr/bin/bash", "/usr/bin/sh"})
         has_t1021 = "pod_exec" in event_types
         has_t1552 = "k8s_secret_access" in event_types
+
         # Same burst threshold as _check_t1610 — a single ordinary connection
-        # must not be enough to satisfy this leg of the chain either.
-        has_t1610 = len({d for _, d in self._conn_burst.get(pod_uid, [])}) >= CONNECTION_BURST_THRESHOLD
+        # must not be enough to satisfy this leg of the chain either. Prune
+        # against *this* event's timestamp (like _event_window above) rather
+        # than reading _conn_burst raw: it's only pruned inside _check_t1610,
+        # which won't necessarily run again for this pod, so an old burst
+        # would otherwise satisfy this leg forever. No ts (missing/unparseable
+        # timestamp) means we can't establish recency, so treat as not met.
+        has_t1610 = False
+        if ts is not None and pod_uid in self._conn_burst:
+            fresh_conns = [
+                (t, d) for t, d in self._conn_burst[pod_uid]
+                if (ts - t) < timedelta(seconds=CONNECTION_BURST_WINDOW_SECONDS)
+            ]
+            self._conn_burst[pod_uid] = fresh_conns
+            has_t1610 = len({d for _, d in fresh_conns}) >= CONNECTION_BURST_THRESHOLD
 
         alerts = []
 
