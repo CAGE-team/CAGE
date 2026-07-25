@@ -30,6 +30,7 @@ class AuditLogConsumer:
         self.cache = cache
         self.out_queue = out_queue
         self._rbac_activity = {}  # username -> [timestamps] for discovery-burst detection
+        self._proc = None
 
     def start(self):
         threading.Thread(target=self._read_loop, daemon=True).start()
@@ -44,9 +45,11 @@ class AuditLogConsumer:
         cmd = ["docker", "exec", cluster_name, "stdbuf", "-oL",
                "tail", "-F", "--retry", "-n", "0", "/var/log/kubernetes/audit.log"]
         while True:
+            proc = None
             try:
                 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                         stderr=subprocess.DEVNULL, text=True, bufsize=1)
+                self._proc = proc
                 for line in iter(proc.stdout.readline, ''):
                     line = line.strip()
                     if not line:
@@ -60,7 +63,26 @@ class AuditLogConsumer:
                 log.warning("Audit log stream ended unexpectedly — reconnecting in 3s")
             except Exception as e:
                 log.error(f"Audit consumer failed: {e} — reconnecting in 3s")
+            finally:
+                self._terminate(proc)
             time.sleep(3)
+
+    def _terminate(self, proc):
+        if proc is None:
+            return
+        try:
+            proc.terminate()
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        except Exception:
+            pass
+        if self._proc is proc:
+            self._proc = None
+
+    def stop(self):
+        """Terminate the in-flight tail -F audit.log subprocess, if any."""
+        self._terminate(self._proc)
 
     def _process(self, raw: dict):
         if raw.get("stage") != "ResponseComplete":

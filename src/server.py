@@ -323,23 +323,54 @@ def index():
 
 if __name__ == '__main__':
     import os
+    import atexit
+    import signal
+    from kubernetes import client as k8s_client, config as k8s_config
+
     ABLATION_MODE = os.environ.get("ABLATION_MODE", "fused")  # tetragon_only | audit_only | fused
     print(f"Starting CAGE correlator... [ABLATION_MODE={ABLATION_MODE}]")
+
+    # Preflight: fail fast if the Kubernetes API is unreachable, instead of
+    # starting consumers that can never produce correlatable output against
+    # a UID cache that will never populate.
+    try:
+        k8s_config.load_kube_config()
+        k8s_client.CoreV1Api().list_pod_for_all_namespaces(limit=1, _request_timeout=5)
+    except Exception as e:
+        print(f"FATAL: cannot reach Kubernetes API server: {e}", file=sys.stderr)
+        sys.exit(1)
+
     correlator.cache.start_watch()
-    time.sleep(2)
+
+    # Wait for the initial pod list rather than guessing a fixed delay —
+    # bounded so a genuinely slow/empty cluster doesn't hang startup.
+    warmup_deadline = time.time() + 5
+    while time.time() < warmup_deadline and not correlator.cache.snapshot():
+        time.sleep(0.1)
+    if not correlator.cache.snapshot():
+        print("WARNING: UID cache still empty after 5s warmup — starting consumers anyway")
 
     from src.tetragon_consumer import TetragonConsumer
     from src.audit_log_consumer import AuditLogConsumer
     from src.network_monitor import NetworkMonitor
 
+    # Consumers that hold a live subprocess (kubectl exec / docker exec) and
+    # must be told to terminate it before the process exits — daemon threads
+    # are killed outright at shutdown and never reach their own cleanup code.
+    running_consumers = []
+
     if ABLATION_MODE in ("tetragon_only", "fused"):
-        TetragonConsumer(correlator.cache, correlator.event_queue).start()
+        tetragon_consumer = TetragonConsumer(correlator.cache, correlator.event_queue)
+        tetragon_consumer.start()
+        running_consumers.append(tetragon_consumer)
         print("  [ON]  TetragonConsumer")
     else:
         print("  [OFF] TetragonConsumer")
 
     if ABLATION_MODE in ("audit_only", "fused"):
-        AuditLogConsumer(correlator.cache, correlator.event_queue).start()
+        audit_consumer = AuditLogConsumer(correlator.cache, correlator.event_queue)
+        audit_consumer.start()
+        running_consumers.append(audit_consumer)
         print("  [ON]  AuditLogConsumer")
     else:
         print("  [OFF] AuditLogConsumer")
@@ -349,6 +380,14 @@ if __name__ == '__main__':
         print("  [ON]  NetworkMonitor")
     else:
         print("  [OFF] NetworkMonitor")
+
+    def _cleanup():
+        for consumer in running_consumers:
+            consumer.stop()
+    atexit.register(_cleanup)
+    # SIGTERM's default disposition kills the process immediately without
+    # running atexit handlers; convert it into a normal exit so cleanup runs.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
 
     # Start correlator loop in background
     threading.Thread(target=correlator_loop, daemon=True).start()
