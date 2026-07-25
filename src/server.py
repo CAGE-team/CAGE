@@ -27,6 +27,24 @@ event_subscribers = []
 alert_subscribers = []
 subscribers_lock = threading.Lock()
 
+# ── Consumer health tracking (observability only — does not touch the
+# detection/correlation path). Populated by correlator_loop() below as it
+# reads events off the shared queue, and by __main__ when consumers start. ──
+ABLATION_MODE = "fused"
+consumer_refs = {"tetragon": None, "audit": None, "network": None}
+EVENT_TYPE_TO_SOURCE = {
+    "process_exec": "tetragon", "capability_check": "tetragon",
+    "k8s_secret_access": "audit", "privileged_pod_created": "audit",
+    "rbac_abuse": "audit", "rbac_discovery": "audit", "pod_exec": "audit",
+    "network_connect": "network",
+}
+source_health = {
+    "tetragon": {"last_seen": None, "event_count": 0},
+    "audit": {"last_seen": None, "event_count": 0},
+    "network": {"last_seen": None, "event_count": 0},
+}
+health_lock = threading.Lock()
+
 def broadcast_event(data):
     with subscribers_lock:
         dead = []
@@ -55,6 +73,15 @@ def correlator_loop():
         try:
             ev = correlator.event_queue.get(timeout=0.5)
             print(f"[DEQUEUE-B] {ev.get('event_type')} {ev.get('binary','')} pod={ev.get('pod_name')}", flush=True)
+
+            # Observability only: note which telemetry source this event
+            # came from and when, for /api/health. Does not affect detection.
+            src = EVENT_TYPE_TO_SOURCE.get(ev.get('event_type'))
+            if src:
+                with health_lock:
+                    source_health[src]['last_seen'] = datetime.now().isoformat()
+                    source_health[src]['event_count'] += 1
+
             # Add to graph
             alerts = correlator.graph.add_event(ev)
             correlator.alert_list.extend(alerts)
@@ -278,6 +305,44 @@ def get_stats():
         'pods_tracked': len(correlator.cache.snapshot()),
     })
 
+# Consumers are considered "live" if their subprocess is still running (for
+# the two that hold one) and they've emitted an event recently enough that
+# silence isn't expected — this is purely a reporting endpoint and reads
+# state the consumers already track; it does not touch detection logic.
+STALE_AFTER_SECONDS = 90
+
+@app.route('/api/health')
+def get_health():
+    now = datetime.now()
+    out = {}
+    for src in ('tetragon', 'audit', 'network'):
+        consumer = consumer_refs.get(src)
+        with health_lock:
+            info = dict(source_health[src])
+        enabled = consumer is not None
+        proc_alive = None
+        if enabled and hasattr(consumer, '_proc'):
+            proc = consumer._proc
+            proc_alive = (proc is not None and proc.poll() is None)
+        age_seconds = None
+        if info['last_seen']:
+            age_seconds = (now - datetime.fromisoformat(info['last_seen'])).total_seconds()
+        stale = enabled and age_seconds is not None and age_seconds > STALE_AFTER_SECONDS
+        out[src] = {
+            'enabled': enabled,
+            'process_alive': proc_alive,
+            'last_seen': info['last_seen'],
+            'age_seconds': age_seconds,
+            'event_count': info['event_count'],
+            'stale': stale,
+        }
+    return jsonify({
+        'ablation_mode': ABLATION_MODE,
+        'sources': out,
+        'queue_size': correlator.event_queue.qsize(),
+        'server_time': now.isoformat(),
+    })
+
 # ── SSE streams ──
 
 def sse_stream(subscriber_list):
@@ -326,6 +391,10 @@ def stream_alerts():
 def index():
     return send_from_directory('../dashboard', 'index.html')
 
+@app.route('/app.js')
+def dashboard_js():
+    return send_from_directory('../dashboard', 'app.js')
+
 if __name__ == '__main__':
     import os
     import atexit
@@ -368,6 +437,7 @@ if __name__ == '__main__':
         tetragon_consumer = TetragonConsumer(correlator.cache, correlator.event_queue)
         tetragon_consumer.start()
         running_consumers.append(tetragon_consumer)
+        consumer_refs["tetragon"] = tetragon_consumer
         print("  [ON]  TetragonConsumer")
     else:
         print("  [OFF] TetragonConsumer")
@@ -376,12 +446,15 @@ if __name__ == '__main__':
         audit_consumer = AuditLogConsumer(correlator.cache, correlator.event_queue)
         audit_consumer.start()
         running_consumers.append(audit_consumer)
+        consumer_refs["audit"] = audit_consumer
         print("  [ON]  AuditLogConsumer")
     else:
         print("  [OFF] AuditLogConsumer")
 
     if ABLATION_MODE == "fused":
-        NetworkMonitor(correlator.cache, correlator.event_queue).start()
+        network_monitor = NetworkMonitor(correlator.cache, correlator.event_queue)
+        network_monitor.start()
+        consumer_refs["network"] = network_monitor
         print("  [ON]  NetworkMonitor")
     else:
         print("  [OFF] NetworkMonitor")
