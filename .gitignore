@@ -5,3 +5,5 @@ venv/
 .venv/
 week4/eval_*.log
 inspect.json
+*.log
+.claude/settings.local.json
