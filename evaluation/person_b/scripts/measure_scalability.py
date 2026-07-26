@@ -48,8 +48,17 @@ def restart_server(repo_dir, logfile):
     # only, never capturing output from a command that backgrounds a
     # long-lived process).
     subprocess.run(["bash", "-c", 'pkill -9 -f "src/server.py"; sleep 2'], timeout=15)
+    # stdin=DEVNULL: without it this wrapper inherits this script's own
+    # stdin, which on a nohup'd/backgrounded parent can leave the `bash -c`
+    # wrapper itself hanging around indefinitely even after `disown` --
+    # caught live during a full-scale E8 run, where a leftover wrapper from
+    # an earlier E6 restart made `pgrep -f "src/server.py" | head -1` (used
+    # by run_full_scale_all.sh's get_server_log()) resolve to the wrapper's
+    # own fd instead of the real server's, silently pointing E8's detection
+    # checks at the wrong log file for an entire run.
     p = subprocess.Popen(["bash", "-c",
-                           f'cd "{repo_dir}" && nohup python3 src/server.py > "{logfile}" 2>&1 & disown; echo started'])
+                           f'cd "{repo_dir}" && nohup python3 src/server.py > "{logfile}" 2>&1 & disown; echo started'],
+                          stdin=subprocess.DEVNULL)
     p.wait(timeout=15)
     deadline = time.monotonic() + 25
     while time.monotonic() < deadline:

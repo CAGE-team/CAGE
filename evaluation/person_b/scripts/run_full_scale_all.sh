@@ -13,7 +13,15 @@ PROGRESS_LOG="$REPO_DIR/evaluation/person_b/full_scale_run_progress.log"
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$PROGRESS_LOG"; }
 
 get_server_log() {
-  PID=$(pgrep -f "src/server.py" | head -1)
+  # Anchored to the START of the command line (^python3 src/server.py) --
+  # a plain `pgrep -f "src/server.py"` also matches any shell wrapper whose
+  # command text happens to contain that substring, e.g. the
+  # `bash -c "... nohup python3 src/server.py ..."` wrapper
+  # measure_scalability.py/run_latency_batch.py use to background the
+  # server. Caught live: a leftover wrapper process outlived its own
+  # restart, `head -1` picked its PID over the real server's, and every
+  # E8 detection check silently read the wrong log file for a full run.
+  PID=$(pgrep -f "^python3 src/server.py" | head -1)
   [ -z "$PID" ] && { echo ""; return; }
   readlink -f "/proc/$PID/fd/1" 2>/dev/null
 }

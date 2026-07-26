@@ -1,0 +1,14 @@
+fault_type,rep,t_injected_iso,t_health_detected_sec,t_health_recovered_sec,t_functional_recovered_sec,alerts_during_fault,alerts_before,alerts_during,alerts_after
+tetragon-consumer-kill,1,2026-07-26T19:09:39.521613,0.5,2.1,,1,497,498,502
+tetragon-consumer-kill,2,2026-07-26T19:11:05.324536,0.5,2.0,,1,503,504,508
+tetragon-consumer-kill,3,2026-07-26T19:12:31.009302,0.5,2.0,,1,509,510,514
+tetragon-consumer-kill,4,2026-07-26T19:13:56.753154,0.5,2.0,,1,514,515,519
+tetragon-consumer-kill,5,2026-07-26T19:15:22.412005,0.5,2.0,,1,519,520,524
+audit-log-truncate,1,2026-07-26T19:16:48.127494,9.7,,,0,525,525,535
+audit-log-truncate,2,2026-07-26T19:20:52.652244,9.6,,,1,535,536,545
+audit-log-truncate,3,2026-07-26T19:24:57.149558,9.7,,,1,545,546,555
+audit-log-truncate,4,2026-07-26T19:29:01.686217,9.6,,,0,556,556,565
+audit-log-truncate,5,2026-07-26T19:33:06.086023,9.7,,,0,566,566,575
+control-plane-outage,1,2026-07-26T19:37:10.630135,9.7,,,0,576,576,576
+control-plane-outage,2,2026-07-26T19:41:55.839239,1.4,,,0,576,576,586
+tetragon-consumer-kill,1,2026-07-26T19:49:16.300704,0.5,2.0,20.8,1,592,593,595

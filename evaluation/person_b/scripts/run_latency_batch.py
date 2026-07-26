@@ -108,8 +108,12 @@ def run_distribution(args):
 
 def start_server(repo_dir, logfile):
     subprocess.run(["bash", "-c", f'pkill -9 -f "src/server.py"; sleep 2'])
+    # stdin=DEVNULL: prevents the wrapper from lingering after `disown` --
+    # see the matching comment in measure_scalability.py's restart_server(),
+    # which is where this bug was actually caught live.
     proc = subprocess.Popen(
         ["bash", "-c", f'cd "{repo_dir}" && nohup python3 src/server.py > "{logfile}" 2>&1 & disown; echo started'],
+        stdin=subprocess.DEVNULL,
     )
     proc.wait()
     # wait for the server to actually bind before returning
