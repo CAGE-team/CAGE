@@ -388,32 +388,50 @@ flagged in Section VIII, is needed before submission.)*
 ## III. Threat Model
 
 **In scope.** An attacker who has already obtained code execution inside
-one pod — via a vulnerable application, a supply-chain compromise, or a
-misconfigured/leaked credential — and attempts to escalate: spawning
-shells, moving laterally to other pods, reading Kubernetes secrets,
-escalating privileges inside or out of the container, abusing RBAC, or
-degrading node resources. This matches the 11 techniques in Table I.
+one pod, whether through a vulnerable application, a supply-chain
+compromise, or a misconfigured or leaked credential, and who then
+attempts to escalate: spawning shells, moving laterally to other pods,
+reading Kubernetes secrets, escalating privileges inside or outside the
+container, abusing RBAC, or degrading node resources. This matches the
+11 techniques in Table I.
 
 **Trust assumptions.** The Linux kernel and eBPF subsystem are trusted;
 an attacker capable of loading rogue eBPF programs or otherwise blinding
 Tetragon's hooks defeats the detection substrate itself, a limitation
-shared by any eBPF-based defense, not one specific to CAGE. The
+shared by any eBPF-based defense and not specific to CAGE. The
 Kubernetes API server and its audit log are trusted; an attacker with
 control-plane-level access sufficient to disable or tamper with audit
-logging is operating at a privilege level well beyond "one compromised
-workload pod." CAGE's own process is trusted and assumed uncompromised —
-the fault-injection evaluation (§VI-H) tests CAGE's resilience to
-*infrastructure* failures affecting its own components, which is a
-reliability property, not a defense against an adversary who has already
-compromised CAGE itself.
+logging is operating at a privilege level well beyond one compromised
+workload pod. CAGE's own process is trusted and assumed uncompromised.
+By design, CAGE performs only read operations against the Kubernetes
+API, watching and listing pods for identity resolution and reading the
+audit log stream, and it never creates, modifies, or deletes any
+cluster resource, so compromising CAGE itself would grant no write
+capability beyond what a compromised workload already has. In this
+evaluation, however, CAGE authenticates with the same local kubeconfig
+used to administer the cluster rather than a purpose-built,
+minimally-scoped ServiceAccount, so its actual runtime credentials are
+broader than its architecture requires; replacing this with a
+dedicated read-only ServiceAccount is straightforward but had not been
+done as of this evaluation. The fault-injection evaluation (§VI-H)
+tests CAGE's resilience to *infrastructure* failures affecting its own
+components, a reliability property, not a defense against an adversary
+who has already compromised CAGE itself.
 
-**Explicitly out of scope.** Kernel/eBPF-blinding rootkits (see above);
-supply-chain compromises that never trigger any of the 11 watched
-behaviors; single events that are individually indistinguishable from
-legitimate administrative activity when viewed in isolation — which is
-precisely the motivating case for chain correlation (§VI-C); multi-cluster
-lateral movement, since the pod-UID cache and correlation window are
-scoped to a single cluster's API server.
+**Explicitly out of scope.** Kernel- or eBPF-blinding rootkits, as
+noted above; supply-chain-introduced malware whose runtime behavior
+falls entirely outside the 11 watched techniques, for example pure
+data exfiltration over an already-open, legitimate network connection
+with no new shell, connection, or privileged action involved; single
+events that are individually indistinguishable from legitimate
+administrative activity when viewed in isolation, which is precisely
+the motivating case for chain correlation (§VI-C); and multi-cluster
+lateral movement. The last of these is a deliberate scoping decision
+rather than an oversight: Kubernetes only guarantees pod UID uniqueness
+within a single cluster's control plane, so using it as a correlation
+key across independently administered clusters would require folding a
+cluster identifier into the key and watching multiple API servers
+concurrently, neither of which this version of CAGE implements.
 
 **Known, deliberately measured boundary.** Several detection rules use
 fixed numeric thresholds: a 5-distinct-destination burst for T1610, a
@@ -964,6 +982,17 @@ the live target system risks reporting fabricated confidence.
   results may not generalize unchanged to substantially larger or
   bare-metal deployments, and audit-log access requires apiserver-manifest
   patching not always available on managed control planes.
+- **CAGE's own runtime credentials.** As documented in §III's trust
+  assumptions, CAGE authenticates against the Kubernetes API using the
+  same local kubeconfig used to administer the cluster, not a
+  purpose-built, minimally-scoped ServiceAccount, even though its
+  actual behavior is read-only by design (no create, patch, or delete
+  calls anywhere in its codebase). This is a real gap between what
+  CAGE needs and what it was granted in this evaluation, not a
+  fundamental architectural constraint; a production deployment should
+  scope it to a dedicated ServiceAccount with get/list/watch
+  permissions on pods and read access to the audit log source, and
+  nothing else.
 - **Kernel/BTF dependency.** T1610 (network lateral movement) requires a
   BTF-enabled kernel (5.10+); confirmed functional on kernel 6.6,
   cross-environment portability (e.g., managed offerings with restricted
