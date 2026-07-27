@@ -1,0 +1,134 @@
+<svg viewBox="0 0 1600 700" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica, Arial, sans-serif" role="img">
+  <title>Fig. X: CAGE overall architecture</title>
+  <desc>Telemetry sources feed three consumer threads that resolve pod UID via a shared cache, place normalized events on a shared queue, which a correlator loop evaluates against the causal graph and broadcasts to a Flask/SSE server for the browser dashboard.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrowDashed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1d4ed8"/>
+    </marker>
+  </defs>
+
+  <style>
+    .box { fill:#f1f5f9; stroke:#334155; stroke-width:2; rx:8; }
+    .hub { fill:#dbeafe; stroke:#1d4ed8; stroke-width:2; rx:8; }
+    .outbox { fill:#f8fafc; stroke:#334155; stroke-width:1.5; stroke-dasharray:4,3; rx:8; }
+    .title { font-size:16px; font-weight:600; fill:#0f172a; }
+    .sub { font-size:12.5px; fill:#475569; }
+    .lane { font-size:12px; fill:#64748b; font-style:italic; }
+    .arrow { stroke:#334155; stroke-width:2; fill:none; marker-end:url(#arrow); }
+    .arrowThin { stroke:#334155; stroke-width:1.6; fill:none; marker-end:url(#arrow); }
+    .arrowDashed { stroke:#1d4ed8; stroke-width:1.5; fill:none; stroke-dasharray:5,4; marker-end:url(#arrowDashed); }
+  </style>
+
+  <!-- Pod UID Cache hub -->
+  <rect class="hub" x="330" y="20" width="420" height="72"/>
+  <text x="540" y="48" text-anchor="middle" class="title">Pod UID Cache</text>
+  <text x="540" y="68" text-anchor="middle" class="sub">Kubernetes watch API (all pods) · indexed by name, IP, service account</text>
+  <text x="540" y="83" text-anchor="middle" class="sub">exponential-backoff reconnect · degraded flag on repeated failure</text>
+
+  <!-- Row 1: Tetragon -->
+  <rect class="outbox" x="30" y="150" width="220" height="70"/>
+  <text x="140" y="178" text-anchor="middle" class="sub" font-weight="600">Tetragon DaemonSet</text>
+  <text x="140" y="197" text-anchor="middle" class="lane">tetra getevents (eBPF)</text>
+
+  <rect class="box" x="320" y="150" width="240" height="70"/>
+  <text x="440" y="176" text-anchor="middle" class="sub" font-weight="600">Tetragon Consumer</text>
+  <text x="440" y="194" text-anchor="middle" class="lane">tag event · resolve pod UID</text>
+  <text x="440" y="210" text-anchor="middle" class="lane">reconnect on stream drop</text>
+
+  <!-- Row 2: Audit log -->
+  <rect class="outbox" x="30" y="300" width="220" height="70"/>
+  <text x="140" y="328" text-anchor="middle" class="sub" font-weight="600">Kubernetes Audit Log</text>
+  <text x="140" y="347" text-anchor="middle" class="lane">tail -F --retry (rotation-safe)</text>
+
+  <rect class="box" x="320" y="300" width="240" height="70"/>
+  <text x="440" y="326" text-anchor="middle" class="sub" font-weight="600">Audit Log Consumer</text>
+  <text x="440" y="344" text-anchor="middle" class="lane">tag event · resolve pod UID</text>
+  <text x="440" y="360" text-anchor="middle" class="lane">ResponseComplete records only</text>
+
+  <!-- Row 3: Network monitor -->
+  <rect class="outbox" x="30" y="450" width="220" height="70"/>
+  <text x="140" y="478" text-anchor="middle" class="sub" font-weight="600">Monitored Pods</text>
+  <text x="140" y="497" text-anchor="middle" class="lane">/proc/net/tcp via kubectl exec</text>
+
+  <rect class="box" x="320" y="450" width="240" height="70"/>
+  <text x="440" y="474" text-anchor="middle" class="sub" font-weight="600">Network Monitor</text>
+  <text x="440" y="492" text-anchor="middle" class="lane">ThreadPoolExecutor, concurrent poll</text>
+  <text x="440" y="508" text-anchor="middle" class="lane">complementary T1610 signal</text>
+
+  <!-- source -> consumer arrows -->
+  <path class="arrow" d="M250,185 H320"/>
+  <path class="arrow" d="M250,335 H320"/>
+  <path class="arrow" d="M250,485 H320"/>
+
+  <!-- Pod UID Cache -> consumers (dashed resolution queries) -->
+  <path class="arrowDashed" d="M470,92 C470,110 460,130 460,150"/>
+  <path class="arrowDashed" d="M540,92 C540,180 500,260 460,300"/>
+  <path class="arrowDashed" d="M610,92 C610,240 500,400 460,450"/>
+
+  <!-- Shared Event Queue -->
+  <rect class="box" x="640" y="290" width="180" height="90"/>
+  <text x="730" y="325" text-anchor="middle" class="sub" font-weight="600">Shared Event</text>
+  <text x="730" y="342" text-anchor="middle" class="sub" font-weight="600">Queue</text>
+  <text x="730" y="360" text-anchor="middle" class="lane">normalized events, all sources</text>
+
+  <!-- consumer -> queue arrows -->
+  <path class="arrowThin" d="M560,185 C610,185 650,250 700,290"/>
+  <path class="arrowThin" d="M560,335 H640"/>
+  <path class="arrowThin" d="M560,485 C610,485 650,420 700,380"/>
+
+  <!-- Correlator Loop -->
+  <rect class="box" x="880" y="200" width="200" height="70"/>
+  <text x="980" y="230" text-anchor="middle" class="sub" font-weight="600">Correlator Loop</text>
+  <text x="980" y="248" text-anchor="middle" class="lane">single-threaded dequeue</text>
+  <text x="980" y="262" text-anchor="middle" class="lane">one event, once</text>
+
+  <path class="arrow" d="M820,335 C850,335 850,260 880,235"/>
+
+  <!-- CausalGraph -->
+  <rect class="box" x="880" y="320" width="200" height="100"/>
+  <text x="980" y="350" text-anchor="middle" class="sub" font-weight="600">Causal Graph</text>
+  <text x="980" y="368" text-anchor="middle" class="lane">per-pod-UID 120s window</text>
+  <text x="980" y="384" text-anchor="middle" class="lane">technique + chain rule checks</text>
+  <text x="980" y="400" text-anchor="middle" class="lane">episode-scoped dedup</text>
+
+  <path class="arrow" d="M980,270 V320"/>
+  <text x="1000" y="298" class="lane">add_event()</text>
+  <path class="arrow" d="M900,320 C860,300 860,255 880,240"/>
+  <text x="800" y="300" class="lane">alerts</text>
+
+  <!-- Flask/SSE server -->
+  <rect class="box" x="1160" y="245" width="200" height="110"/>
+  <text x="1260" y="275" text-anchor="middle" class="sub" font-weight="600">Flask Server</text>
+  <text x="1260" y="293" text-anchor="middle" class="lane">REST API (/api/*)</text>
+  <text x="1260" y="309" text-anchor="middle" class="lane">SSE: /stream/events</text>
+  <text x="1260" y="325" text-anchor="middle" class="lane">SSE: /stream/alerts</text>
+  <text x="1260" y="343" text-anchor="middle" class="lane">loopback-only, 127.0.0.1:5000</text>
+
+  <path class="arrow" d="M1080,230 C1120,230 1120,270 1160,285"/>
+  <text x="1085" y="222" class="lane">broadcast events</text>
+  <path class="arrow" d="M1080,370 C1120,370 1120,320 1160,310"/>
+  <text x="1085" y="392" class="lane">broadcast alerts</text>
+
+  <!-- Dashboard -->
+  <rect class="outbox" x="1400" y="255" width="180" height="90"/>
+  <text x="1490" y="285" text-anchor="middle" class="sub" font-weight="600">Browser Dashboard</text>
+  <text x="1490" y="303" text-anchor="middle" class="lane">canvas graph · MITRE panel</text>
+  <text x="1490" y="318" text-anchor="middle" class="lane">kill-chain stepper</text>
+  <text x="1490" y="333" text-anchor="middle" class="lane">per-source health view</text>
+
+  <path class="arrow" d="M1360,300 H1400"/>
+
+  <!-- Legend -->
+  <rect x="30" y="600" width="18" height="14" class="box"/>
+  <text x="55" y="611" class="lane">process / thread</text>
+  <rect x="200" y="600" width="18" height="14" class="hub"/>
+  <text x="225" y="611" class="lane">shared identity cache</text>
+  <rect x="400" y="600" width="18" height="14" class="outbox"/>
+  <text x="425" y="611" class="lane">external system / boundary</text>
+  <path class="arrowDashed" d="M600,607 H650"/>
+  <text x="660" y="611" class="lane">UID resolution query</text>
+</svg>
