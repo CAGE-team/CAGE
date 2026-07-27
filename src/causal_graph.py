@@ -348,8 +348,8 @@ class CausalGraph:
         cutoff = ts - timedelta(seconds=FORK_BOMB_WINDOW_SECONDS)
         self._exec_burst[pod_uid] = [t for t in window if t > cutoff]
 
+        burst_key = (pod_uid, "T1499_BURST")
         if len(self._exec_burst[pod_uid]) >= FORK_BOMB_EXEC_THRESHOLD:
-            burst_key = (pod_uid, "T1499_BURST")
             if burst_key in self._fired_chains:
                 return None
             self._fired_chains.add(burst_key)
@@ -362,6 +362,16 @@ class CausalGraph:
                 "pod_uid": pod_uid, "pod_name": event.get("pod_name"),
                 "namespace": event.get("namespace"), "timestamp": event.get("timestamp"),
             }
+        else:
+            # Episode-scoped re-arm (same pattern as the chain correlator
+            # below): once the burst count naturally drops back under
+            # threshold as old execs age out of the window, clear the
+            # fired flag so a genuinely NEW burst can fire again. Without
+            # this, a pod that fires T1499 once could never fire it again
+            # for its entire lifetime -- verified live: a second, fully
+            # independent 30-exec burst against the same long-lived
+            # attacker pod produced zero alert until this fix.
+            self._fired_chains.discard(burst_key)
         return None
 
     def _check_privileged_pod(self, event):

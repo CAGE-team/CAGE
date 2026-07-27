@@ -22,7 +22,8 @@ nodes:
         mountPath: /var/log/kubernetes
         readOnly: false
   extraMounts:
-  - hostPath: /tmp/cage-audit-policy.yaml
+  - hostPath: /home/arundhathi_k/CAGE/audit-policy.yaml
     containerPath: /etc/kubernetes/audit-policy.yaml
+    readOnly: true
 - role: worker
 - role: worker
