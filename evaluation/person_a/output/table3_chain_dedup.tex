@@ -1,0 +1,16 @@
+\begin{table}[t]
+\centering
+\caption{Chain correlation and episode-scoped deduplication results.}
+\label{tab:chain-dedup}
+\begin{tabular}{lll}
+\toprule
+Chain & Old code (fired/N) & New code (fired/N) \\
+\midrule
+T1021->T1059->T1552 & not run & 10/10 \\
+T1059->T1548->T1611 & not run & 10/10 \\
+T1059->T1552 & not run & 10/10 \\
+T1059->T1610->T1552 & not run & 10/10 \\
+T1611->T1552 & not run & 10/10 \\
+\bottomrule
+\end{tabular}
+\end{table}

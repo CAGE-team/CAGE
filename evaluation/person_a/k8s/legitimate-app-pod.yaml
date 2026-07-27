@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: legitimate-app
+  namespace: default
+spec:
+  containers:
+  - name: legitimate-app
+    image: nginx:alpine
+    ports:
+    - containerPort: 80

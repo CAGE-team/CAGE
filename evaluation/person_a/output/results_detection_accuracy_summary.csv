@@ -1,0 +1,12 @@
+technique,tp,fp,fn,precision,recall,f1,recall_ci_low,recall_ci_high,has_benign_control,source
+T1059,10,10,0,0.5,1.0,0.667,0.722,1.0,True,tetragon
+T1021,10,10,0,0.5,1.0,0.667,0.722,1.0,True,audit
+T1552,10,0,0,1.0,1.0,1.0,0.722,1.0,True,audit
+T1610,10,0,0,1.0,1.0,1.0,0.722,1.0,True,tetragon
+T1611,10,10,0,0.5,1.0,0.667,0.722,1.0,True,tetragon
+T1548,10,10,0,0.5,1.0,0.667,0.722,1.0,True,tetragon
+T1499,10,0,0,1.0,1.0,1.0,0.722,1.0,True,tetragon
+T1496,10,0,0,1.0,1.0,1.0,0.722,1.0,False,tetragon
+T1613,10,0,0,1.0,1.0,1.0,0.722,1.0,False,audit
+T1548-PRIV-POD,10,0,0,1.0,1.0,1.0,0.722,1.0,False,audit
+T1548.005,10,0,0,1.0,1.0,1.0,0.722,1.0,False,audit

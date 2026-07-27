@@ -1,0 +1,13 @@
+mode,technique,independent_var,trial,attack_intensity,fired,latency_sec
+evasion,T1610,just_under,1,4,0,60.14
+evasion,T1610,just_under,2,4,0,60.13
+evasion,T1610,at_threshold,1,5,1,22.26
+evasion,T1610,at_threshold,2,5,1,23.48
+evasion,T1499,at_threshold,1,25,1,29.47
+evasion,T1499,at_threshold,2,25,1,29.68
+evasion,T1613,just_under,1,9,0,60.15
+evasion,T1613,just_under,2,9,0,60.14
+evasion,T1613,at_threshold,1,10,1,0.0
+evasion,T1613,at_threshold,2,10,1,0.0
+evasion,T1499,just_under,1,15,0,60.19
+evasion,T1499,just_under,2,15,0,60.01

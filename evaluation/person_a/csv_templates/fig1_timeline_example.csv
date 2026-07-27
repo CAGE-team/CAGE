@@ -1,0 +1,7 @@
+t_offset_sec,source,label
+0.0,audit,kubectl exec (T1021)
+0.3,tetragon,/bin/bash spawned (T1059)
+0.4,tetragon,id executed
+0.5,tetragon,whoami executed
+9.1,audit,GET /api/v1/secrets (T1552)
+9.2,correlator,T1021->T1059->T1552 CRITICAL
