@@ -74,7 +74,17 @@ def http_get_json(path):
 
 
 def find_server_pid():
-    rc, out, _ = run(["pgrep", "-f", "src/server.py"])
+    # Anchored to the start of the command line -- an unanchored
+    # "src/server.py" pattern also matches the `bash -c "... nohup python3
+    # src/server.py ..."` wrapper measure_scalability.py/run_latency_batch.py
+    # use to background a server restart, and if that wrapper outlives its
+    # own restart (see restart_server()'s stdin=DEVNULL fix) it sorts before
+    # the real server's higher PID, silently redirecting every caller of
+    # this function (E5's CPU/RSS sampling in particular) onto the wrong,
+    # near-idle process. Caught live: a full E5 run measured 0.0% CPU / 1.7MB
+    # RSS the whole way through -- implausible for a running Flask server --
+    # because it had been sampling a leftover shell wrapper, not python3.
+    rc, out, _ = run(["pgrep", "-f", "^python3 src/server.py"])
     pids = [p for p in out.strip().split("\n") if p]
     return pids
 
