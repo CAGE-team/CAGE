@@ -21,8 +21,19 @@ nodes:
         hostPath: /var/log/kubernetes
         mountPath: /var/log/kubernetes
         readOnly: false
+  # kind requires an absolute host path here -- there is no portable way to
+  # express "this repo's audit-policy.yaml" across different machines/users
+  # directly in this file. Do NOT hardcode your own machine's absolute path
+  # (a previous version hardcoded one contributor's WSL home directory,
+  # which broke cluster creation for everyone else). Instead, always create
+  # this cluster via `restart_cage.sh` (repo root), which copies
+  # audit-policy.yaml to a fresh scratch path and substitutes the
+  # placeholder below for the real, current, machine-local path
+  # automatically. If you must run `kind create cluster --config
+  # kind-config.yaml` directly, replace the placeholder below with an
+  # absolute path to your own checkout's audit-policy.yaml first.
   extraMounts:
-  - hostPath: /home/arundhathi_k/CAGE/audit-policy.yaml
+  - hostPath: __AUDIT_POLICY_HOSTPATH_PLACEHOLDER__
     containerPath: /etc/kubernetes/audit-policy.yaml
     readOnly: true
 - role: worker

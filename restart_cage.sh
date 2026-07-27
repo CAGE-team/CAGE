@@ -54,7 +54,12 @@ if [ "$SKIP_CLUSTER" = false ]; then
   AUDIT_SCRATCH="/tmp/cage-audit-policy-restart-$(date +%s)-$$.yaml"
   KIND_SCRATCH="/tmp/kind-config-restart-$(date +%s)-$$.yaml"
   cp "$REPO_DIR/audit-policy.yaml" "$AUDIT_SCRATCH"
-  sed "s#/tmp/cage-audit-policy.yaml#$AUDIT_SCRATCH#" "$REPO_DIR/kind-config.yaml" > "$KIND_SCRATCH"
+  # kind-config.yaml's extraMounts hostPath is a placeholder
+  # (__AUDIT_POLICY_HOSTPATH_PLACEHOLDER__), not a real path -- it can't be,
+  # since kind requires an absolute host path and this repo is checked out
+  # at a different location on every contributor's machine. Substitute in
+  # this run's own fresh scratch path here, every time.
+  sed "s#__AUDIT_POLICY_HOSTPATH_PLACEHOLDER__#$AUDIT_SCRATCH#" "$REPO_DIR/kind-config.yaml" > "$KIND_SCRATCH"
   kind create cluster --config "$KIND_SCRATCH" --name cage
 
   step "3/7 Installing Tetragon"
