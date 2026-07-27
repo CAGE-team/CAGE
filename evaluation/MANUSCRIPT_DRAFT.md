@@ -7,14 +7,17 @@ related-work comparison (Table 6). Sections owned by Person A (detection
 accuracy E1, ablation E2, chain-correlation E3, threshold sensitivity E7)
 are marked `[PERSON A — PENDING]` below with the exact structure her
 completed data should slot into — nothing in her scope has been started,
-duplicated, or guessed at here. All Person-B numbers currently shown are
-from the **pilot-scale** run (see the inline scale notes in each
-subsection); a full-scale re-run (N=20 for E4, 10 waves/N for E6,
-300/600/300s for E5, 5 reps/scenario for E8) is in progress as of this
-draft — see `evaluation/person_b/full_scale_run_progress.log` for status
-— and this file's numbers should be refreshed from
-`evaluation/person_b/RESULTS.md` and `evaluation/person_b/tables/*.md`
-once that run completes.
+duplicated, or guessed at here. **All Person-B numbers below are now
+full scale** (N=20 for E4, 300/600/300s for E5, 10 waves/N for E6, 5
+reps/scenario for E8), sourced from `evaluation/person_b/RESULTS.md`,
+which is the authoritative, more detailed version of everything
+summarized here — including three real bugs found and fixed in this
+evaluation's own scripts during full-scale data collection (two silently
+corrupted E5/E8 data via a stale-process PID ambiguity, now fixed and
+re-run clean; one is an unresolved measurement confound in the
+connection-age sweep, reported honestly rather than papered over). See
+`RESULTS.md`'s "Bugs found and fixed" section for full detail before
+citing any single number from this draft in isolation.
 
 ---
 
@@ -40,8 +43,16 @@ of each telemetry source, chain-correlation precision/recall, threshold
 sensitivity — `[PERSON A — PENDING]`) and systems characteristics
 (end-to-end detection latency, resource overhead, monitoring-subsystem
 scalability, and fault tolerance under injected infrastructure failures).
-[Abstract to be finalized with Person A's headline numbers once E1-E3/E7
-complete; Person-B headline: `[FILL IN FROM FULL-SCALE RESULTS]`.]
+On the systems side, CAGE detects audit-log-sourced techniques in a mean
+0.19s and eBPF-sourced techniques in a mean 27.96s (N=20 trials each,
+95% CIs within ±0.1s of the mean for both), imposes a flat ~3.2% CPU and
+~135MB RSS overhead regardless of load (300/600/300s idle/active/idle
+measurement), keeps its pod-monitoring subsystem's cycle time within a
+narrow band of its 5-second target across a 1-to-16 scan-target-pod
+range with no statistically distinguishable growth, and functionally
+recovers from all three tested classes of infrastructure fault in 15/15
+injected trials. [Abstract to be finalized with Person A's headline
+numbers once E1-E3/E7 complete.]
 
 ---
 
@@ -100,16 +111,20 @@ This paper makes the following contributions:
    (§V).
 3. Two systems findings that revise or validate specific design
    decisions rather than merely characterizing performance: (a) a
-   ~30-second Tetragon-sourced detection latency plateau that is
-   reproducibly *not* connection-age-dependent, contrary to this
-   project's own earlier working hypothesis (§V-D); and (b) direct
-   evidence that a `ThreadPoolExecutor`-based concurrent-polling fix to
-   the pod-to-pod network monitor holds cycle time flat across the
-   tested pod-count range, where the original sequential design would
-   have grown linearly and — as independently discovered during this
-   project's own T1610 debugging — could silently split a single
-   scan-burst attack across two polling cycles and evade detection
-   entirely (§V-F).
+   ~28-second Tetragon-sourced detection latency plateau, highly
+   consistent across N=20 replicated trials (σ=0.17s) — whether this
+   plateau depends on connection age remains an open question: two
+   independent connection-age sweeps at different scales produced
+   contradictory results, and we report both plus the measurement
+   confound we traced the discrepancy to, rather than asserting either
+   answer (§V-D); and (b) direct evidence that a
+   `ThreadPoolExecutor`-based concurrent-polling fix to the pod-to-pod
+   network monitor holds cycle time flat (95% CIs overlapping across the
+   entire tested range) across the tested pod-count range, where the
+   original sequential design would have grown linearly and — as
+   independently discovered during this project's own T1610 debugging —
+   could silently split a single scan-burst attack across two polling
+   cycles and evade detection entirely (§V-F).
 4. An honest, explicitly scoped limitations analysis covering
    environment generalizability, attack-script realism, adversarial
    evasion testing, and statistical power, rather than a limitations
@@ -266,60 +281,79 @@ any stage's server connection drops mid-run.
 
 ### D. Detection Latency (E4)
 
-**Scale note:** pilot data shown (N=8 trials/technique for the
-distribution measurement, 5 points for the connection-age sweep);
-full-scale re-run (N=20, ages 5/15/30/60/120) in progress, see
-`evaluation/person_b/full_scale_run_progress.log`. Replace this
-subsection's numbers with `evaluation/person_b/tables/table4_latency.md`
-once complete.
+**Scale:** full plan spec, N=20 trials/technique for the distribution
+measurement. See `evaluation/person_b/tables/table4_latency.md` and
+`evaluation/person_b/RESULTS.md` for full detail.
 
-Detection latency is cleanly bimodal by source. Audit-log-sourced
-detections (T1552) are fast and tight: mean 0.42s across 8 pilot trials.
-Tetragon-sourced detections (T1059) plateau at approximately 30s on a
-server that has been running for more than a few minutes (mean 29.9s,
-σ≈0.09s across 8 pilot trials — essentially zero variance, not an
-occasional slow tail).
+Detection latency is cleanly bimodal by source, and the split tightens
+further at full scale. Audit-log-sourced detections (T1552) are fast and
+tight: mean 0.19s, 95% CI [0.18, 0.20], across N=20 trials.
+Tetragon-sourced detections (T1059) plateau at 27.96s, 95% CI [27.88,
+28.04], with the lowest variance observed at any scale tested in this
+evaluation (σ=0.17s across 20 trials) — not an occasional slow tail, a
+highly consistent, reproducible plateau on a server that has been running
+for more than a few minutes.
 
-A dedicated connection-age sweep — firing T1059 at controlled elapsed
-times since server start, against the full 3-consumer server rather than
-an isolated test — found latency **flat at ~29.8–30.0s across the entire
-7-to-127-second age range tested**, directly contradicting this project's
-earlier working hypothesis (formed from an isolated, non-representative
-test) that the effect was connection-age-dependent. This is reported here
-as a revision, not a confirmation: an attempted engineering fix based on
-the age hypothesis (periodically cycling the Tetragon consumer's
-subprocess connection) was implemented and live-tested, found to
-introduce real event loss without reliably reducing latency, and reverted
-— a decision this sweep's finding retroactively explains, since the
-premise the fix was built on does not hold. Figure 7
-(`figures/fig7_latency_vs_connage.png`) plots this sweep.
+**Whether this plateau depends on connection age remains an open
+question, reported honestly rather than resolved.** Two independent
+connection-age sweeps — firing T1059 at controlled elapsed times since a
+fresh server restart — were run at different scales and produced
+**contradictory results**. A pilot-scale sweep (N=5 points, ages 7–127s)
+found latency flat at ~29.8–30.0s at every point tested, suggesting no
+age dependence (revising this project's earlier hypothesis, formed from
+an isolated non-representative test, that younger connections detect
+faster). A full-scale sweep using the identical script and methodology —
+run immediately after the larger N=20 distribution test — instead found
+short, non-monotonic latencies (0.17s–14.2s) with no discernible pattern
+across the same age range. Inspecting the raw server log for this run
+shows a burst of 13 T1059 detections in the 24 seconds immediately after
+the sweep's server restart, consistent with a backlog of recently-queued
+Tetragon events still draining through the newly-restarted consumer —
+plausibly larger here because it followed a 40-detection distribution
+test (2.5x the pilot's), long enough to still be draining when the
+sweep's early trials fired and contaminate the position-tracking logic's
+next-match search with a backlogged, not freshly-caused, detection. **We
+report both sweeps' raw numbers, the log evidence for the likely
+confound, and neither hypothesis as confirmed** — see
+`evaluation/person_b/RESULTS.md`'s E4 section for the full comparison
+table and reasoning, and §VI for the general lesson this adds to the
+Limitations section. Figure 7 (`figures/fig7_latency_vs_connage.png`)
+plots the full-scale sweep as measured.
 
-**Practical implication for the rest of this evaluation and for any
-deployment:** Tetragon-sourced detections should be expected to complete
-in roughly 30 seconds, consistently, not near-instantaneously — this
+An earlier attempted engineering fix based on the original age hypothesis
+(periodically cycling the Tetragon consumer's subprocess connection) was
+implemented and live-tested, found to introduce real event loss without
+reliably reducing latency, and reverted — independent of the connage
+sweep's specific findings, this remains the right call given the
+reproducible cost (event loss) it demonstrated.
+
+**Practical implication, unaffected by the connage-sweep ambiguity:**
+Tetragon-sourced detections should be expected to complete in roughly 28
+seconds, consistently, not near-instantaneously — established by the
+N=20 distribution test, which does not restart the server between trials
+and is therefore not subject to the backlog confound above. This
 motivated the 60-second detection-wait timeouts used throughout this
 evaluation's own scripts, and should inform any downstream consumer of
-CAGE's alerts (e.g., an automated response system) about realistic
-latency budgets for eBPF-sourced technique classes specifically.
+CAGE's alerts about realistic latency budgets for eBPF-sourced technique
+classes specifically.
 
 ### E. Resource Overhead (E5)
 
-**Scale note:** pilot data shown (idle_pre=60s / active=120s /
-idle_post=60s); full-scale re-run (300s/600s/300s) in progress. Replace
-with `evaluation/person_b/tables/table5_overhead.md` once complete.
+**Scale:** full plan spec, idle_pre=300s / active=600s / idle_post=300s,
+241 total samples. This is the corrected re-run after a stale-process PID
+bug caused the first full-scale attempt to measure the wrong process
+entirely (0.0% CPU / 1.7MB RSS — see RESULTS.md's "Bugs found" section);
+fixed and re-run clean. See `evaluation/person_b/tables/table5_overhead.md`.
 
-CPU usage on the CAGE server process is flat at 1.4–1.5% across idle and
-active phases alike (pilot data), with no visible spike under a
-repeating T1059+T1552 attack load every 3 seconds. RSS grows modestly
-(~0.7MB over the ~4-minute pilot run, 91.9MB→92.6MB) and does not regress
-in the idle_post phase — this pilot run is explicitly too short to
-distinguish a small bounded constant term from a slow leak; the
-full-scale 600s active-phase run is expected to generate enough events to
-exercise the pod-cache's event-count-triggered (not wall-clock-triggered)
-stale-entry sweep multiple times, which should be sufficient to observe
-whether RSS growth actually plateaus. **This claim should not be
-finalized until the full-scale RSS trend is available** — flagged
-explicitly rather than resolved by pilot data alone.
+CPU usage on the CAGE server process is flat at 3.1–3.2% across idle and
+active phases alike, with no visible spike under a repeating T1059+T1552
+attack load every 3 seconds. RSS is flat at 134.8–134.9MB, growing by
+only ~0.1MB across the full 20-minute run — this longer, full-scale
+window resolves the pilot run's explicitly-flagged ambiguity ("too short
+to distinguish a small bounded constant term from a slow leak") in favor
+of **bounded**: a 5x longer active phase generating substantially more
+events shows growth essentially stopping, consistent with the periodic
+stale-entry sweep reclaiming memory as designed rather than a leak.
 
 Overhead here is scoped to the CAGE server process only, not Tetragon's
 own per-node agent cost, which this `kind`-based cluster's tooling cannot
@@ -328,9 +362,8 @@ measure without a metrics-server this evaluation did not install (see
 
 ### F. NetworkMonitor Polling Scalability (E6)
 
-**Scale note:** pilot data shown (3 cycles/N); full-scale re-run (10
-waves/N) in progress. Replace with
-`evaluation/person_b/tables/table5b_scalability.md` once complete.
+**Scale:** full plan spec, 10 waves/N (9 usable inter-wave gaps per N).
+See `evaluation/person_b/tables/table5b_scalability.md`.
 
 `EVALUATION_PLAN.md`'s original expectation was roughly linear cycle-time
 growth with monitored-pod count, crossing the nominal 5-second target
@@ -347,25 +380,30 @@ subsystem's own timing, not by the detection rule itself.
 
 The fix replaced sequential polling with a `ThreadPoolExecutor`-based
 concurrent sweep, bounding cycle time by the slowest single `kubectl
-exec` call rather than their sum. Pilot data across N∈{1,2,4,8,16}
-scan-target pods (4 to 19 total monitored pods) shows cycle time
-remaining within roughly 1 second of the 5-second target across the
-**entire** tested range, with no discernible growth trend. This is
-reported as direct evidence the fix holds under scale, and the paper's
-framing of this subsection is accordingly **"validating a scalability
-fix,"** not "characterizing a scalability limitation" as the plan
-originally anticipated — a stronger and more specific claim than the
-plan's own framing called for.
+exec` call rather than their sum. Full-scale data across N∈{1,2,4,8,16}
+scan-target pods (3 to 18 total monitored pods, 9 waves each) shows mean
+cycle time in a narrow 4.68–5.35s band across the entire tested range,
+with 95% confidence intervals that overlap heavily across every N
+(roughly [3.6s, 6.1s] throughout) — two of the five N values have a mean
+that nudges just over the nominal 5s target, but given the overlapping
+CIs this is statistically indistinguishable from noise around a flat
+cycle time, not a growth trend. This is reported as direct evidence the
+fix holds under scale, now with a proper uncertainty band rather than
+3-wave point estimates, and the paper's framing of this subsection is
+accordingly **"validating a scalability fix,"** not "characterizing a
+scalability limitation" as the plan originally anticipated — a stronger
+and more specific claim than the plan's own framing called for.
 
 ### G. Threshold Sensitivity (E7) `[PERSON A — PENDING]`
 
 ### H. Fault Injection and Recovery (E8)
 
-**Scale note:** pilot data shown (1 rep/scenario); full-scale re-run (5
-reps/scenario, with Wilson 95% CI on success rate) in progress. Replace
-with `evaluation/person_b/tables/table_fault_recovery_summary.md` once
-complete — that table reports the success-rate CI this subsection
-currently cannot, since a CI is not meaningful at N=1.
+**Scale:** full plan spec, 5 reps × 3 scenarios = 15 fault injections.
+This is the corrected re-run after a stale-process PID bug pointed the
+functional-recovery check at the wrong log file for the first full-scale
+attempt (13 of 15 trials affected — see RESULTS.md's "Bugs found"
+section); fixed and re-run clean. See
+`evaluation/person_b/tables/table_fault_recovery_summary.md`.
 
 Three infrastructure faults were injected against the live `fused`-mode
 server, in ascending order of severity: (1) killing the local Tetragon
@@ -376,22 +414,33 @@ handling; (3) a full `docker stop`/`start` of the `cage-control-plane`
 container, simultaneously removing the API server, that node's Tetragon
 agent, and the audit log file — the most severe single fault tested.
 
-In the pilot run, all three faults functionally recovered (a real
-post-fault attack was correctly detected) without any manual
-intervention: 34.9s for the Tetragon-kill scenario, 241.9s for the
-audit-truncate scenario, and 303.8s (~5 minutes) for the full
-control-plane outage — the worst case. None of the recovery logic
-exercised here (`tetragon_consumer.py`'s 2s reconnect loop,
-`uid_resolver.py`'s exponential backoff, `tail -F --retry`) was added for
-this experiment; all of it is pre-existing production code. At most 1
-spurious alert appeared during any single fault window, consistent with
-the attacker pod's own ordinary ~30-second background activity loop
-rather than fault-induced false detection, though this pilot run did not
-isolate that background loop's contribution explicitly (noted as a
-methodology gap the full-scale run's 5x replication does not by itself
-close — an explicit no-background-traffic control run would be needed to
-fully rule this out, and is recommended as a follow-up if reviewers press
-on it).
+**All 15 injected faults functionally recovered without any manual
+intervention — 5/5 (100%) for every scenario**, Wilson 95% CI [0.57,
+1.00] per scenario. The CI's lower bound of 0.57 (rather than a value
+closer to 1.0) is the correct, honest consequence of a small N=5 sample,
+not evidence of unreliability, and is reported specifically so that
+distinction stays visible rather than collapsing into an unqualified
+"100%". Mean functional-recovery time: 13.3s for tetragon-consumer-kill,
+226.0s for audit-log-truncate, 250.3s for control-plane-outage — the same
+ordering the pilot's single runs found (34.9s / 241.9s / 303.8s), with
+full-scale means somewhat faster, plausibly because the pilot's one-shot
+control-plane run happened to include extra apiserver warmup variance
+that averages out across 5 reps. None of the recovery logic exercised
+here (`tetragon_consumer.py`'s 2s reconnect loop, `uid_resolver.py`'s
+exponential backoff, `tail -F --retry`) was added for this experiment;
+all of it is pre-existing production code.
+
+Spurious-alert counts (4/15 windows for tetragon-kill, 12/15 for
+audit-truncate, 0/15 for control-plane-outage) remain proportionally
+consistent with the attacker pod's own ~30-second background T1059 loop
+landing inside the longer fault windows, rather than evidence of
+fault-induced false detections — audit-truncate and control-plane-outage
+both have multi-minute functional-recovery windows, giving the
+background loop more chances to fire during them. This pilot-noted
+methodology gap (the background loop is not isolated or controlled for)
+still applies at full scale and is carried into §VI unchanged; an
+explicit no-background-traffic control run would close it and is
+recommended as a follow-up if reviewers press on it.
 
 A secondary finding concerns the `/api/health` staleness flag itself:
 for 2 of the 3 scenarios, health-recovery could not be observed via the
@@ -444,10 +493,25 @@ category — transclude the full file at final assembly.)*
   dependent on Person A's E2 ablation infrastructure) remains future
   work.
 - **Tetragon delivery latency mechanism not conclusively root-caused:**
-  the ~30s plateau (§V-D) is characterized precisely but its underlying
-  cause within Tetragon's own event-delivery path was not identified
-  within this project's scope; an attempted fix was reverted after live
-  testing showed it traded latency for event loss.
+  the ~28s plateau (§V-D) is characterized precisely and highly
+  reproducibly (N=20, σ=0.17s) but its underlying cause within Tetragon's
+  own event-delivery path was not identified within this project's scope;
+  an attempted fix was reverted after live testing showed it traded
+  latency for event loss.
+- **Connection-age dependence is an open question, not resolved:** two
+  connage sweeps at different scales gave contradictory results, with
+  evidence pointing to a post-restart event-backlog confound in the
+  full-scale run rather than a genuine change in system behavior; neither
+  the original age-dependence hypothesis nor its pilot-scale revision is
+  re-confirmed (§V-D).
+- **This evaluation's own measurement infrastructure had a
+  reproducible failure mode**, caught and fixed during full-scale data
+  collection: a stale restart-wrapper process could be silently mistaken
+  for the CAGE server by substring-based `pgrep` matching, corrupting two
+  full-scale measurements (E5, E8) before detection. Both were caught by
+  sanity-checking against physically plausible ranges, fixed, and
+  re-run — reported transparently as a property of the evaluation
+  environment worth documenting for anyone extending this suite.
 
 ---
 

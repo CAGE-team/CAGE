@@ -95,6 +95,42 @@ the paper's Limitations / Threats to Validity section.
   part of this gap (vanilla Tetragon alone, since it is already running
   as CAGE's own eBPF backend) as the highest-value follow-up.
 
+## Evaluation infrastructure reliability (found during full-scale data collection)
+
+- **Stale-process PID ambiguity silently corrupted two full-scale
+  measurements before being caught.** This evaluation's own tooling
+  resolves the CAGE server's PID via `pgrep -f "src/server.py"` in
+  several places, to either read its log file or sample its CPU/RSS. This
+  pattern also matches the `bash -c "... nohup python3 src/server.py ...
+  & disown"` wrapper used to background a server restart; when that
+  wrapper failed to exit promptly (traced to the wrapper inheriting the
+  parent script's stdin instead of being fully detached), its lower PID
+  sorted before the real server's and was silently picked instead. This
+  corrupted an entire full-scale E8 run (13/15 fault-recovery trials
+  recorded a false "never recovered") and a full-scale E5 run (measured
+  0.0% CPU / 1.7MB RSS for 20 minutes — the wrapper process, not the
+  server). Both were caught by comparing results against physically
+  plausible ranges and pilot-scale baselines, fixed by anchoring the
+  pattern to `^python3 src/server.py`, and re-run clean. Reported here
+  because the general lesson — that this specific WSL/`kind` environment
+  can leave restart-wrapper processes alive in ways that confuse
+  substring-based process matching — is a property of the environment
+  this evaluation ran in, not just a one-off script bug, and future
+  extensions of this evaluation suite should assume any PID-resolution-by
+  -pattern code needs the same anchoring discipline.
+- **Connection-age sweep result is an open question, not a resolved
+  finding.** Two independent runs of the identical connage-sweep
+  methodology, at different scales, produced contradictory results (see
+  `RESULTS.md`'s E4 section for the full comparison). The full-scale run
+  shows evidence of contamination by a draining event backlog immediately
+  after server restart; the fix (wait for the log to go quiet before
+  starting the age clock, rather than a fixed warmup) is identified but
+  not implemented or re-tested within this evaluation's scope. This paper
+  relies on the N=20 distribution test (unaffected, since it does not
+  restart the server between trials) for its primary latency claim, and
+  explicitly does not claim to have resolved the connection-age question
+  either direction.
+
 ## Systems characterization (not fixed, reported honestly)
 
 - **Tetragon delivery latency.** A live investigation (see README.md and
