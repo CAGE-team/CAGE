@@ -460,7 +460,7 @@ Flask/SSE server and a live browser dashboard.
   control-plane actions: `kubectl exec` sessions, Secret reads,
   privileged-pod creation, and cluster-admin/wildcard RBAC grants.
 - A **pod UID cache**, populated via the Kubernetes watch API, is the
-  correlation key shared by both consumers above — every event from
+  correlation key shared by both consumers above; every event from
   either source is tagged with the pod UID it belongs to before being
   handed to the causal graph, which is what makes cross-source
   correlation possible without assuming stable pod names or IP
@@ -468,7 +468,7 @@ Flask/SSE server and a live browser dashboard.
   attacker-influenceable in ways a cluster-assigned UID is not).
 - A **pod-to-pod network monitor** independently polls scan-target pods
   for new outbound TCP connections (concurrent, `ThreadPoolExecutor`-based
-  polling — see §VI-F for why this replaced an earlier sequential design)
+  polling; see §VI-F for why this replaced an earlier sequential design)
   as a complementary signal to the Tetragon `tcp_connect` kprobe path.
 
 **Detection.** CAGE currently detects 11 MITRE ATT&CK techniques:
@@ -496,93 +496,113 @@ T1059→T1548→T1611, and T1611→T1552. Chain detections use **episode-scoped
 deduplication**: a chain fires once per continuous incident and
 automatically re-arms once the underlying condition clears, tracking
 whether each chain's constituent legs remain continuously satisfied
-rather than using a simple fire-once-forever flag — §VI-C validates this
-property empirically, and it was also, concretely, a real defect found
-and fixed in a different detector (the T1499 fork-bomb rule) during this
-evaluation effort (§VII), which lacked this re-arm step entirely prior to
-the fix.
+rather than using a simple fire-once-forever flag. §VI-C validates this
+property empirically. It was also the site of a real, concrete defect:
+the T1499 fork-bomb rule lacked this re-arm step entirely until it was
+found and fixed during this evaluation effort (§VII).
 
 **Scope-exclusion design.** Every behavioral rule except T1021 (§VIII)
 excludes events from CAGE's own namespace-scoped infrastructure by
-namespace, not by pod name — a name-based exclusion list was found during
-development to be a real evasion vector (an attacker able to name or
-rename a pod to match an excluded name could suppress detection of their
-own activity) and was removed in favor of the namespace-only design.
+namespace, not by pod name. A name-based exclusion list was found
+during development to be a real evasion vector (an attacker able to
+name or rename a pod to match an excluded name could suppress
+detection of their own activity) and was removed in favor of the
+namespace-only design.
 
 ---
 
 ## V. Evaluation Methodology
 
-**Environment.** All experiments (both detection-quality and
-systems-characteristics) run against the same `kind`-provisioned 3-node
-cluster (1 control-plane + 2 workers) on a single host, Tetragon v1.7.0,
-Kubernetes v1.30.0, kernel 6.6.87.2 (WSL2, Linux subsystem on Windows),
-`ABLATION_MODE=fused` (all consumers active) unless a specific experiment
-(E2, or a future quantitative Table II baseline) deliberately varies it.
+**Environment.** All experiments, both detection-quality and
+systems-characteristics, run against the same `kind`-provisioned 3-node
+cluster (1 control-plane, 2 workers) on a single host: an Intel Core
+i5-1235U (12th generation), with the WSL2 environment hosting the
+cluster configured for 4 processors and 6GB of memory via
+`.wslconfig`, Tetragon v1.7.0, Kubernetes v1.30.0, and kernel 6.6.87.2.
+Every
+experiment runs with all telemetry consumers active (referred to
+throughout as fused mode) unless it specifically varies that
+configuration, as the telemetry-source ablation study (E2) does.
 
-**Metrics and their definitions.** For per-technique detection (E1) and
+**Metrics and their definitions.** Precision, recall, and F1-score
+follow their standard definitions: precision is TP / (TP + FP), recall
+is TP / (TP + FN), and F1 is their harmonic mean, 2 x precision x
+recall / (precision + recall). For per-technique detection (E1) and
 chain correlation (E3), a **true positive** is a malicious trial that
-produced a matching alert (`wait_for_pattern`, scoped to that trial's own
-log window between its start and the next trial's start, not a
+produced a matching alert (`wait_for_pattern`, scoped to that trial's
+own log window between its start and the next trial's start, not a
 time-window match against a pool of concurrent events); a **false
 positive** is a matched benign trial that produced that same alert
 despite no injected attack event; a **false negative** is a malicious
-trial that produced no matching alert within the detection-wait timeout.
-Because each trial's own scoped log window is the source of truth,
-classification does not depend on any cross-trial time-window inference
-— an earlier version of the E1 script used exactly such an inference
-(a shared 30-second alert-to-event matching window) and was found to
-silently misclassify results for fast-firing techniques (§VII); this was
-corrected before the results in §VI-A were collected. For the systems
-experiments: **detection latency** (E4) is measured wall-clock-to-
-wall-clock from the attack command's issuance to the corresponding alert
-line appearing in the server log; **resource overhead** (E5) is
-`ps -o %cpu=,rss=` sampled every 5s on the CAGE server process
-specifically (not the Tetragon agent or kube-apiserver — see the scope
-note in §VI-E); **cycle time** (E6) is the wall-clock gap between
-consecutive full polling sweeps of the `NetworkMonitor`; **fault
-recovery** (E8) distinguishes *health-flag* recovery (`/api/health`
-reporting non-stale) from *functional* recovery (a real post-fault
-attack is correctly detected) as two separate, both-reported
-measurements, because the health flag is event-triggered and cannot by
-construction prove recovery before new traffic occurs (see §VI-H).
+trial that produced no matching alert within the detection-wait
+timeout. Because each trial's own scoped log window is the source of
+truth, classification does not depend on any cross-trial time-window
+inference. An earlier version of the E1 script used exactly such an
+inference, a shared 30-second alert-to-event matching window, and was
+found to silently misclassify results for fast-firing techniques
+(§VII); this was corrected before the results in §VI-A were collected.
+For the systems experiments: **detection latency** (E4) is measured
+wall-clock-to-wall-clock from the attack command's issuance to the
+corresponding alert line appearing in the server log; **resource
+overhead** (E5) is CPU percentage and resident set size, sampled every
+5 seconds with `ps -o %cpu=,rss=`, on the CAGE server process
+specifically, not the Tetragon agent or the Kubernetes API server (see
+the scope note in §VI-E); **cycle time** (E6) is the wall-clock gap
+between consecutive full polling sweeps of the `NetworkMonitor`; and
+**fault recovery** (E8) distinguishes *health-flag* recovery (the
+health endpoint reporting non-stale) from *functional* recovery (a
+real post-fault attack is correctly detected) as two separate,
+both-reported measurements, because the health flag is event-triggered
+and cannot by construction prove recovery before new traffic occurs
+(see §VI-H).
 
-**Statistical treatment.** Binomial proportions — per-technique recall
-(E1), ablation detection rate (E2), chain re-fire rate (E3),
-evasion-boundary fired/not-fired rate (E4 — *sic*, see note), and
-per-scenario functional-recovery rate (E8) — are reported with **Wilson
+**Statistical treatment.** Binomial proportions, including
+per-technique recall (E1), ablation detection rate (E2), chain re-fire
+rate (E3), evasion-boundary fired-or-not-fired rate (E9), and
+per-scenario functional-recovery rate (E8), are reported with **Wilson
 score 95% confidence intervals**, not the normal (Wald) approximation,
 because Wilson intervals remain well-behaved at the sample sizes used
-here (N=10 for detection-quality experiments, N=5 reps/scenario for E8)
-and at the 0%/100% observed rates that occur throughout this evaluation,
-where the Wald interval degenerates to zero width and misrepresents the
-true uncertainty. Continuous measurements (E4 latency, E5 CPU/RSS, E6
-cycle time) are reported as mean with a 95% confidence interval computed
-from the t-distribution (df = N−1), alongside median, stdev, p95,
-min/max for distributional shape.
+here and at the 0%/100% observed rates that occur throughout this
+evaluation, where the Wald interval degenerates to zero width and
+misrepresents the true uncertainty. Detection-quality experiments use
+N=10 trials per condition; fault-injection trials (E8) use N=5
+repetitions per scenario. Both sample sizes were set by the practical
+constraints of a live-cluster, human-supervised evaluation rather than
+a formal power analysis: each trial requires waiting up to the full
+detection-window timeout before a non-detection can be confirmed, and
+this cost multiplies across 11 techniques and both attack and benign
+conditions into several hours of supervised session time at N=10
+alone. The resulting confidence intervals (a floor of 72.2% at 10/10,
+discussed further in §VIII) are reported specifically so that
+constraint is visible to the reader rather than hidden behind point
+estimates. Continuous measurements (E4 latency, E5 CPU and
+memory, E6 cycle time) are reported as the mean with a 95% confidence
+interval computed from the t-distribution (df = N-1), alongside the
+median, standard deviation, 95th percentile, and minimum/maximum for
+distributional shape.
 
 **Benign-control honesty.** Not every technique admits a meaningful
-benign near-miss. Creating a privileged pod, granting cluster-admin, and
-issuing an RBAC-discovery burst are inherently suspicious *at the API
-level* — there is no legitimate version of "create a privileged pod"
-that looks different from the audit log's point of view. For T1496,
-T1613, T1548-PRIV-POD, and T1548.005 we report recall only; a contrived
-benign control for these would test nothing real, and we say so
-explicitly rather than omit the caveat.
+benign near-miss. Creating a privileged pod, granting cluster-admin,
+and issuing an RBAC-discovery burst are inherently suspicious *at the
+API level*; there is no legitimate version of "create a privileged
+pod" that looks different from the audit log's point of view. For
+T1496, T1613, T1548-PRIV-POD, and T1548.005 we report recall only. A
+contrived benign control for these would test nothing real, and we say
+so explicitly rather than omit the caveat.
 
 **Reproducibility.** Detection-quality scripts live under
 `evaluation/person_a/scripts/`; systems-characteristics scripts live
-under `evaluation/person_b/scripts/`. Both take explicit CLI flags for
-scale (trial counts, phase durations, replication count) and write
-timestamped raw CSVs that are never overwritten silently — pilot-scale
-runs were archived (`_pilot_*` / `output_pilot_N2-3/` suffixes) before
-each full-scale re-run began, so both scales' raw data remain available
-for inspection. `evaluation/person_b/scripts/run_full_scale_all.sh`
-reproduces the full-scale systems-characteristics run end to end,
-including automatic environment-recovery retries (`restart_cage.sh`) if
-any stage's server connection drops mid-run; the detection-quality
-scripts' exact run order and commands are documented in
-`evaluation/person_a/README.md`.
+under `evaluation/person_b/scripts/`. Both take explicit command-line
+flags for scale (trial counts, phase durations, repetition count) and
+write timestamped raw CSVs that are never overwritten silently.
+Pilot-scale runs were archived before each full-scale re-run began, so
+both scales' raw data remain available for inspection.
+`evaluation/person_b/scripts/run_full_scale_all.sh` reproduces the
+full-scale systems-characteristics run end to end, including automatic
+environment-recovery retries if any stage's server connection drops
+mid-run. The detection-quality scripts' exact run order and commands
+are documented in `evaluation/person_a/README.md`. A complete artifact
+inventory is given in the Appendix.
 
 ---
 
@@ -1027,14 +1047,18 @@ the live target system risks reporting fabricated confidence.
   strategies (timing fragmentation across the correlation window, binary
   renaming) remain untested.
 - **Sample size.** N=10 per condition (detection-quality experiments)
-  narrows the 95% CI to a floor of 72.2% at 10/10 — a substantial
+  narrows the 95% CI to a floor of 72.2% at 10/10, a substantial
   improvement over pilot N=2-3 data, but a larger N would further
   tighten intervals, particularly relevant near any future severity- or
-  threshold-boundary claims. Fault-injection trials (E8) use N=5
-  reps/scenario for practical session-time reasons rather than a formal
-  power analysis; confidence intervals are reported throughout
-  specifically so this uncertainty is visible rather than hidden behind
-  point estimates.
+  threshold-boundary claims. This ceiling is resource-bounded rather
+  than arbitrary (§V): each trial requires waiting up to the full
+  detection-window timeout to confirm a non-detection, and this cost
+  multiplies across 11 techniques and both attack and benign conditions
+  into several hours of supervised live-cluster session time at N=10
+  alone. Fault-injection trials (E8) use N=5 reps/scenario for the same
+  practical session-time reason rather than a formal power analysis;
+  confidence intervals are reported throughout specifically so this
+  uncertainty is visible rather than hidden behind point estimates.
 - **Deferred experiments.** An old-code-versus-new-code comparison for
   the chain-correlation fix (§IV), and a threshold-sweep experiment
   varying detection thresholds across multiple values rather than only
