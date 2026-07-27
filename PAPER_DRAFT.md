@@ -39,7 +39,7 @@ keyed on the pod UID — immutable for a pod's lifetime — to detect 11
 MITRE ATT&CK techniques and correlate them into five multi-hop attack
 chains with episode-scoped deduplication. Evaluated entirely on live
 Kubernetes infrastructure, CAGE achieves 100% per-technique recall
-across all 11 techniques (220 trials). A three-condition, 330-trial
+across all 11 techniques (180 trials). A three-condition, 330-trial
 ablation study reveals a perfectly complementary telemetry split — every
 technique is detected with 0% probability under one single-source
 configuration and 100% under the fused one, and no single source covers
@@ -397,7 +397,8 @@ omit the caveat.
 ### A. RQ1 — Detection Accuracy (Table IV / Fig. 5)
 
 N=10 attack trials and, where a meaningful control exists, N=10 matched
-benign trials, live cluster, fused configuration (220 total trials).
+benign trials, live cluster, fused configuration (180 total trials: 7
+techniques with both attack and benign trials, 4 attack-only).
 
 **TABLE IV. Per-technique detection accuracy.**
 

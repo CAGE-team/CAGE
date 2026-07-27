@@ -40,7 +40,7 @@ ATT&CK techniques spanning both telemetry sources and correlates them
 into five documented multi-hop attack chains in real time, exposed
 through a live dashboard. We evaluate CAGE entirely on live Kubernetes
 infrastructure along two axes. On detection quality: per-technique
-recall reaches 100% across all 11 techniques (220 trials); a
+recall reaches 100% across all 11 techniques (180 trials); a
 three-condition, 330-trial ablation study reveals a perfectly
 complementary telemetry split — every technique is detected with 0%
 probability under one single-source configuration and 100% under the
@@ -494,7 +494,8 @@ scripts' exact run order and commands are documented in
 ### A. RQ1 — Per-Technique Detection Accuracy (E1)
 
 N=10 attack trials and, where a meaningful control exists, N=10 matched
-benign trials, live cluster, fused configuration (220 total trials).
+benign trials, live cluster, fused configuration (180 total trials: 7
+techniques with both attack and benign trials, 4 attack-only).
 
 **TABLE IV. Per-technique detection accuracy.**
 
@@ -515,9 +516,13 @@ benign trials, live cluster, fused configuration (220 total trials).
 † No meaningful benign control exists (§V); precision not computed for
 these four rows.
 
-Recall is 100% across all 11 techniques with a 95% confidence floor of
-72.2% at this sample size — every attack trial was detected, in every
-trial, with no exceptions. Precision divides the technique set exactly
+Fig. 5 visualizes Table IV as a per-technique precision/recall/F1
+heatmap, with each technique's recall confidence interval annotated
+directly on the cell and an asterisk marking the four techniques with no
+benign control. Recall is 100% across all 11 techniques with a 95%
+confidence floor of 72.2% at this sample size — every attack trial was
+detected, in every trial, with no exceptions. Precision divides the
+technique set exactly
 along the design boundary stated in §IV: the four techniques with no
 scope exclusion (T1059, T1021, T1548, T1611) show precisely 50%
 precision because they correctly fire on the matched benign action as
@@ -552,6 +557,8 @@ N=10 trials per technique per condition, 3 conditions
 | T1548-PRIV-POD | 0/10 (0%) | 10/10 (100%) | 10/10 (100%) |
 | T1548.005 | 0/10 (0%) | 10/10 (100%) | 10/10 (100%) |
 
+Fig. 3 renders Table V as a heatmap and Fig. 4 as a per-tactic radar
+chart, both making the complementary-coverage pattern visually immediate.
 This is the paper's central empirical argument for cross-layer fusion.
 The split is perfectly complementary with zero exceptions across 220
 single-source trials: every technique is detected with 0% probability
@@ -586,8 +593,11 @@ logic.
 | T1059→T1548→T1611 | 10/10 |
 | T1611→T1552 | 10/10 |
 
-Every documented chain re-fires reliably across 10 independent episodes
-each, with zero missed detections (50/50). This directly validates the
+Fig. 8 plots cumulative detections per trial for a representative chain
+against the ideal one-per-trial diagonal, illustrating this reliability
+visually alongside the full per-chain breakdown in Table VI-C. Every
+documented chain re-fires reliably across 10 independent episodes each,
+with zero missed detections (50/50). This directly validates the
 episode-scoped re-arm design described in §IV: had the earlier,
 fire-once-forever dedup behavior (§VII, defect 1) still been present, at
 most the *first* trial of each chain would have fired and every
@@ -601,9 +611,11 @@ negative — the empirical signature of that defect class is precisely a
 measurement. See `evaluation/person_b/tables/table4_latency.md` and
 `evaluation/person_b/RESULTS.md` for full detail.
 
-Detection latency is cleanly bimodal by source, and the split tightens
-further at full scale. Audit-log-sourced detections (T1552) are fast and
-tight: mean 0.19s, 95% CI [0.18, 0.20], across N=20 trials.
+Fig. 6 plots the latency distribution for both techniques as empirical
+CDFs, making the bimodal source split visually explicit. Detection
+latency is cleanly bimodal by source, and the split tightens further at
+full scale. Audit-log-sourced detections (T1552) are fast and tight:
+mean 0.19s, 95% CI [0.18, 0.20], across N=20 trials.
 Tetragon-sourced detections (T1059) plateau at 27.96s, 95% CI [27.88,
 28.04], with the lowest variance observed at any scale tested in this
 evaluation (σ=0.17s across 20 trials) — not an occasional slow tail, a
@@ -661,9 +673,11 @@ bug caused the first full-scale attempt to measure the wrong process
 entirely (0.0% CPU / 1.7MB RSS — see RESULTS.md's "Bugs found" section);
 fixed and re-run clean. See `evaluation/person_b/tables/table5_overhead.md`.
 
-CPU usage on the CAGE server process is flat at 3.1–3.2% across idle and
-active phases alike, with no visible spike under a repeating T1059+T1552
-attack load every 3 seconds. RSS is flat at 134.8–134.9MB, growing by
+Fig. 9 plots CPU and RSS over the full idle/active/idle timeline,
+showing both flat lines directly. CPU usage on the CAGE server process
+is flat at 3.1–3.2% across idle and active phases alike, with no visible
+spike under a repeating T1059+T1552 attack load every 3 seconds. RSS is
+flat at 134.8–134.9MB, growing by
 only ~0.1MB across the full 20-minute run — this longer, full-scale
 window resolves the pilot run's explicitly-flagged ambiguity ("too short
 to distinguish a small bounded constant term from a slow leak") in favor
@@ -735,10 +749,12 @@ support (§VII).
 | T1499 (threshold 25) | 0/10 fired | 10/10 fired |
 | T1613 (threshold 10) | 0/10 fired | 10/10 fired |
 
-All three threshold-based detectors show the same clean pattern: an
-attacker who knows the default threshold and stays under it evades
-detection with certainty (0/10 across 30 total sub-threshold trials); an
-attacker who reaches the threshold is caught with equal certainty (10/10
+Fig. 10 plots this boundary as a per-technique dot plot, both boundary
+conditions shown side by side. All three threshold-based detectors show
+the same clean pattern: an attacker who knows the default threshold and
+stays under it evades detection with certainty (0/10 across 30 total
+sub-threshold trials); an attacker who reaches the threshold is caught
+with equal certainty (10/10
 across 30 total at-threshold trials). We report this as a measured,
 disclosed property of a threshold-based detector (§III) rather than as a
 weakness discovered post hoc — the threat model explicitly scopes this
@@ -762,6 +778,8 @@ audit log to 0 bytes in place, testing `tail -F --retry`'s truncation
 handling; (3) a full `docker stop`/`start` of the `cage-control-plane`
 container, simultaneously removing the API server, that node's Tetragon
 agent, and the audit log file — the most severe single fault tested.
+Fig. 2 shows a representative recovery timeline across all three
+scenarios.
 
 **All 15 injected faults functionally recovered without any manual
 intervention — 5/5 (100%) for every scenario**, Wilson 95% CI [0.57,
@@ -779,9 +797,10 @@ here (`tetragon_consumer.py`'s 2s reconnect loop, `uid_resolver.py`'s
 exponential backoff, `tail -F --retry`) was added for this experiment;
 all of it is pre-existing production code.
 
-Spurious-alert counts (4/15 windows for tetragon-kill, 12/15 for
-audit-truncate, 0/15 for control-plane-outage) remain proportionally
-consistent with the attacker pod's own ~30-second background T1059 loop
+Spurious-alert counts (4 total alerts across the 5 tetragon-kill
+windows, 12 across the 5 audit-truncate windows, 0 across the 5
+control-plane-outage windows) remain proportionally consistent with the
+attacker pod's own ~30-second background T1059 loop
 landing inside the longer fault windows, rather than evidence of
 fault-induced false detections — audit-truncate and control-plane-outage
 both have multi-minute functional-recovery windows, giving the
@@ -918,6 +937,15 @@ the live target system risks reporting fabricated confidence.
 - **No quantitative baseline.** Table 6 is qualitative; a head-to-head
   vanilla-Tetragon comparison (the cheapest quantitative addition,
   dependent on the E2 ablation infrastructure) remains future work.
+- **Attack-chain timeline figure not yet built.** A planned illustrative
+  figure showing one representative multi-hop chain's timeline
+  (T1021→T1059→T1552, annotated by telemetry source) requires
+  hand-curating real timestamps from a server log rather than being
+  auto-generated from the trial CSVs like the other figures, and was not
+  completed in this evaluation cycle. The plotting script and CSV
+  template exist (`evaluation/person_a/plots/plot_fig1_chain_timeline.py`);
+  populating it with real data from an E1 or E3 run is a short remaining
+  task before final submission.
 - **Tetragon delivery-latency mechanism not conclusively root-caused.**
   The ~28s plateau (§VI-D) is characterized precisely and highly
   reproducibly (N=20, σ=0.17s) but its underlying cause within Tetragon's

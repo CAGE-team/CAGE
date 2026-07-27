@@ -75,8 +75,13 @@ def plot_panel_b(ax, rows):
             total = len(matching)
             rate = fired / total * 100 if total else 0
             color = PALETTE["attack"] if boundary == "just_under" else PALETTE["fused"]
-            label = f"{tech} ({'n-1' if boundary=='just_under' else 'n'}="
-            label += f"{DEFAULT_THRESHOLDS[tech]-1 if boundary=='just_under' else DEFAULT_THRESHOLDS[tech]})"
+            # Read the actual attack_intensity used from the data rather
+            # than assuming threshold-1 -- T1499's just_under uses a
+            # comfortable margin (n=15), not exactly threshold-1=24 (see
+            # PAPER_DRAFT.md's Limitations for why). Verified live: the
+            # old hardcoded-assumption version mislabeled this point.
+            actual_n = matching[0]["attack_intensity"]
+            label = f"{tech} (n={actual_n})"
             ax.scatter([rate], [y + marker_offset], color=color, s=60, zorder=3,
                         edgecolors="black", linewidths=0.5)
             ax.text(rate + 3, y + marker_offset, label, fontsize=5.5, va="center")
@@ -89,8 +94,8 @@ def plot_panel_b(ax, rows):
     ax.set_xlabel("Fired rate (%)")
     ax.set_xlim(-5, 130)
     ax.set_title("(b) Evasion Boundary at Default Thresholds", fontsize=8)
-    ax.scatter([], [], color=PALETTE["attack"], label="Just under threshold (n-1)")
-    ax.scatter([], [], color=PALETTE["fused"], label="At threshold (n)")
+    ax.scatter([], [], color=PALETTE["attack"], label="Just under threshold")
+    ax.scatter([], [], color=PALETTE["fused"], label="At threshold")
     ax.legend(fontsize=6, loc="lower right")
 
 
@@ -102,23 +107,32 @@ def main():
 
     rows = load_rows(args.csv_path)
     apply_style()
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.0, 3.0))
 
-    if any(r["mode"] == "sweep" for r in rows):
+    has_sweep = any(r["mode"] == "sweep" for r in rows)
+    has_evasion = any(r["mode"] == "evasion" for r in rows)
+
+    # Single-panel when only one mode's data is present (E7 sweep was
+    # explicitly descoped for this evaluation cycle -- see
+    # EVALUATION_REVIEW.md/PAPER_DRAFT.md's Limitations) -- a shipped
+    # figure with an empty "no data yet" placeholder panel is not
+    # submission-quality. Two-panel layout is used automatically once
+    # sweep data exists.
+    if has_sweep and has_evasion:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.0, 3.0))
         plot_panel_a(ax1, rows)
-    else:
-        ax1.text(0.5, 0.5, "no sweep-mode data in this CSV yet", ha="center", va="center",
-                  transform=ax1.transAxes, fontsize=7)
-        ax1.set_title("(a) T1610 Threshold Sweep", fontsize=8)
-
-    if any(r["mode"] == "evasion" for r in rows):
         plot_panel_b(ax2, rows)
+        fig.suptitle("Parameter Sensitivity & Evasion Boundary", fontsize=9, y=1.03)
+    elif has_evasion:
+        fig, ax2 = plt.subplots(1, 1, figsize=(3.4, 3.0))
+        plot_panel_b(ax2, rows)
+        ax2.set_title("")
+        fig.suptitle("Evasion Boundary at Default Thresholds", fontsize=9, y=1.02)
     else:
-        ax2.text(0.5, 0.5, "no evasion-mode data in this CSV yet", ha="center", va="center",
-                  transform=ax2.transAxes, fontsize=7)
-        ax2.set_title("(b) Evasion Boundary at Default Thresholds", fontsize=8)
+        fig, ax1 = plt.subplots(1, 1, figsize=(3.4, 3.0))
+        plot_panel_a(ax1, rows)
+        ax1.set_title("")
+        fig.suptitle("T1610 Threshold Sweep", fontsize=9, y=1.02)
 
-    fig.suptitle("Parameter Sensitivity & Evasion Boundary", fontsize=9, y=1.03)
     fig.tight_layout()
     pdf, png = save_figure(fig, args.output_dir, "fig10_parameter_sensitivity")
     print(f"Fig. 10 -> {pdf}")
