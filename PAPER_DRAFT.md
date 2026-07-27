@@ -1,20 +1,22 @@
 # CAGE: A Cross-Layer Attack Graph Engine for Kubernetes Runtime Security
 
-*Draft, structured to IEEE Access conventions. Person A's scope (E1/E2/E3/E9)
-is complete at N=10 with every number below drawn from real live-cluster
-data — nothing is placeholder or simulated. This draft covers Person A's
-sections only; Person B's own manuscript draft
-(`evaluation/MANUSCRIPT_DRAFT.md`) covers the systems/performance
-evaluation (latency, overhead, scalability, fault tolerance) and is
-structured with `[PERSON A — PENDING]` slots intended for this draft's
-content — the two drafts should be reconciled into one before submission
-rather than treated as competing papers. Citations for Related Work were
-verified via web search this session (not fabricated); exact page/DOI
-details should still be cross-checked against camera-ready versions
-before submission — see inline notes. Abstract and Introduction have had
-a dedicated critical revision pass (word-count discipline, citation
-precision, superlative-claim softening); remaining sections are complete
-in content but have not yet had the same line-level polish pass.*
+**SUPERSEDED.** This standalone draft has been merged into
+`evaluation/MANUSCRIPT_DRAFT.md`, which is now the single canonical
+manuscript combining this file's detection-quality content (E1/E2/E3/E9)
+with Person B's systems-characteristics content (E4/E5/E6/E8) into one
+paper with a shared Abstract, Introduction, Related Work, Threat Model,
+System Design, Methodology, Results (organized by 8 research questions
+across both evaluation axes), Lessons Learned, Limitations, and
+Conclusion. Edit `evaluation/MANUSCRIPT_DRAFT.md` going forward, not this
+file — kept here only as a historical/reference copy of Person A's
+original independent draft and its citation-verification work.
+
+*Original header, retained for reference: Draft, structured to IEEE
+Access conventions. Person A's scope (E1/E2/E3/E9) is complete at N=10
+with every number below drawn from real live-cluster data. Citations for
+Related Work were verified via web search this session (not fabricated);
+exact page/DOI details should still be cross-checked against
+camera-ready versions before submission — see inline notes.*
 
 ---
 
