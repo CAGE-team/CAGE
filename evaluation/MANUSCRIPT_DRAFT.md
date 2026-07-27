@@ -438,12 +438,10 @@ correlator loop drains the shared queue, evaluates each event against a
 bounded per-identity temporal window to decide whether a technique or a
 multi-hop chain has fired, and forwards both raw events and any
 resulting alerts to a Flask server that exposes a REST API and two
-Server-Sent Events streams to a browser dashboard. *[Fig. X, proposed new
-architecture diagram, not yet produced; final figure number to be
-assigned during manuscript assembly. Content: the pod UID cache at the
-center, with the Tetragon consumer, audit log consumer, and network
-monitor each feeding it and the shared event queue, the correlator
-consuming that queue, and the Flask/SSE layer downstream.]*
+Server-Sent Events streams to a browser dashboard (Fig. X). *[Fig. X,
+overall CAGE architecture; source and rendered versions at
+evaluation/figures/fig_X_architecture.svg / .pdf. Final figure number to
+be assigned during manuscript assembly.]*
 
 Two consequences follow from this structure. First, the hardest problem
 in the system is not any individual detection rule; it is establishing
@@ -555,11 +553,10 @@ reference a container are placed in a small retry buffer and
 re-attempted every 300 milliseconds for up to two seconds; anything still
 unresolved after that window is dropped and logged explicitly, on the
 premise that an event genuinely un-attributable to any live pod after
-two seconds is unlikely to become attributable later. *[Fig. Y, proposed
-Pod UID resolution workflow diagram, not yet produced. Content: the three
-resolution paths (direct pod reference, container-ID map lookup, learned
-runc-exec mapping) converging on the pod UID cache, with the bounded
-retry buffer as the path taken when all three initially fail.]*
+two seconds is unlikely to become attributable later (Fig. Y). *[Fig. Y,
+pod UID resolution workflow; source and rendered versions at
+evaluation/figures/fig_Y_uid_resolution.svg / .pdf. Final figure number
+to be assigned during manuscript assembly.]*
 
 Every event tagging function additionally discards events whose resolved
 namespace falls in a small set of cluster-infrastructure namespaces,

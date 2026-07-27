@@ -1,4 +1,4 @@
-<svg viewBox="0 0 1000 900" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica, Arial, sans-serif" role="img">
+<svg viewBox="0 0 1060 950" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica, Arial, sans-serif" role="img">
   <title>Fig. Y: Pod UID resolution workflow</title>
   <desc>An eBPF event resolves its pod UID through direct pod reference, a learned container-exec mapping, or a periodically refreshed container-ID map; unresolved events enter a bounded 300-millisecond retry loop for up to two seconds before being dropped.</desc>
 
@@ -101,8 +101,8 @@
   <text x="500" y="710" text-anchor="middle" class="sub">Resolved before</text>
   <text x="500" y="726" text-anchor="middle" class="sub">2s elapses?</text>
 
-  <text x="200" y="700" class="lbl" fill="#15803d">yes</text>
-  <path class="yes" d="M340,715 C150,715 150,180 340,150"/>
+  <text x="700" y="705" class="lbl" fill="#15803d">yes</text>
+  <path class="yes" d="M660,715 C980,715 980,150 800,150"/>
 
   <text x="500" y="795" text-anchor="middle" class="lbl" fill="#b91c1c">no</text>
   <path class="no" d="M500,770 V800"/>
@@ -119,10 +119,10 @@
   <path class="arrow" d="M290,125 H340" stroke-dasharray="4,3"/>
 
   <!-- Legend -->
-  <rect x="60" y="850" width="18" height="14" class="store"/>
-  <text x="88" y="861" class="sub">refreshed / learned data store</text>
-  <rect x="300" y="850" width="18" height="14" class="resolved"/>
-  <text x="328" y="861" class="sub">resolved</text>
-  <rect x="420" y="850" width="18" height="14" class="dropped"/>
-  <text x="448" y="861" class="sub">dropped after 2s window</text>
+  <rect x="60" y="900" width="18" height="14" class="store"/>
+  <text x="88" y="911" class="sub">refreshed / learned data store</text>
+  <rect x="300" y="900" width="18" height="14" class="resolved"/>
+  <text x="328" y="911" class="sub">resolved</text>
+  <rect x="420" y="900" width="18" height="14" class="dropped"/>
+  <text x="448" y="911" class="sub">dropped after 2s window</text>
 </svg>
