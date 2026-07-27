@@ -3,16 +3,16 @@
 **Status of this draft:** Consolidated manuscript merging Person A's
 detection-quality evaluation (E1 per-technique accuracy, E2 telemetry
 ablation, E3 chain-correlation reliability, E9 evasion-boundary
-characterization — all live-cluster, N=10) with Person B's
+characterization, all live-cluster, N=10) with Person B's
 systems-characteristics evaluation (E4 latency, E5 resource overhead, E6
-polling scalability, E8 fault tolerance — all live-cluster, full scale).
+polling scalability, E8 fault tolerance, all live-cluster, full scale).
 Both evaluations are now complete; nothing below is a placeholder.
 Line-level copyediting for a single consistent voice throughout is the
-main remaining polish pass before submission — the Abstract and
-Introduction have already had a dedicated critical-review pass (citation
-verification, word-count discipline); Sections III–IX are complete in
-content but not yet harmonized line-by-line between the two
-contributors' original drafting styles.
+main remaining polish pass before submission. The Abstract, Introduction,
+and Related Work have already had a dedicated critical-review pass
+(citation verification, word-count discipline, no em dashes); Sections
+III-IX are complete in content but not yet harmonized line-by-line
+between the two contributors' original drafting styles.
 
 ---
 
@@ -248,24 +248,44 @@ Section IX concludes.
 
 ## II. Related Work
 
+MITRE ATT&CK [9] is the common vocabulary this paper builds on: a
+curated, publicly maintained catalog of adversary tactics and
+techniques, originally scoped to enterprise IT and since extended to
+cloud and containerized environments. A recent systematization of the
+research literature found ATT&CK used across cyber threat intelligence,
+intrusion detection, red-team exercises, and risk assessment, spanning
+enterprise networks, industrial control systems, and mobile platforms
+[10]. CAGE maps each of its eleven detected behaviors to a specific
+ATT&CK technique identifier rather than an informal, project-specific
+label, so its coverage claims can be compared directly against the
+ATT&CK-mapped systems discussed below.
+
+### A. Kernel-Level Runtime Security via eBPF
+
 Falco [1], originally developed by Sysdig and now a CNCF-graduated
 project, monitors kernel syscalls via eBPF or a kernel-module probe and
 evaluates them against a customizable rule set, enriching events with
-container and Kubernetes metadata and forwarding alerts to downstream
-sinks. Cilium Tetragon [2] similarly instruments process execution and
-network events via eBPF `TracingPolicy` objects. Both are
-single-telemetry-source, single-event rule engines: neither correlates a
-syscall-visible event with a control-plane-only event, because neither
-ingests the Kubernetes audit log as a first-class input. CAGE uses
-Tetragon as its eBPF telemetry producer but adds the audit-log and
-correlation layers Tetragon does not provide on its own.
+container and Kubernetes metadata before forwarding alerts to
+downstream sinks. Cilium Tetragon [2] similarly instruments process
+execution and network events through eBPF `TracingPolicy` objects. A
+more recent addition to this space, eBPF-PATROL [11], intercepts system
+calls and execution context to enforce user-defined policies, targeting
+reverse shells, privilege escalation, and container-escape attempts
+with reported overhead under 2.5%. All three operate purely at the
+kernel boundary: none ingests the Kubernetes audit log, and none has a
+way to relate a syscall-visible event to the API-level action that may
+have caused it. CAGE uses Tetragon as its eBPF telemetry producer but
+adds the audit-log and correlation layers that none of these tools
+provide on their own.
+
+### B. Audit-Log-Based Detection
 
 K8NTEXT [3] (Franzil et al., *Computer Networks*, 2026) addresses a
 related but different problem: Kubernetes audit logs record each API
 call largely independently, so the several secondary events a single
 user action triggers are scattered through the log with little explicit
-linkage. K8NTEXT reconstructs *contexts* — groupings of an actor's
-action with the downstream events it caused — using a combination of
+linkage. K8NTEXT reconstructs *contexts*, groupings of an actor's
+action with the downstream events it caused, using a combination of
 inference rules and a deep-learning model, reporting over 95% grouping
 accuracy on operations involving up to 100+ correlated audit entries.
 This is a log-*structuring* system rather than a technique-detection
@@ -273,25 +293,53 @@ system, and it is scoped to the audit log alone; it cannot observe the
 kernel-side half of a chain such as T1021→T1059 (remote exec, visible in
 the audit log, followed by the shell it spawns, visible only via eBPF).
 
+### C. Provenance and Information-Flow-Based Systems
+
 PACED [4] (Abbas et al., IC2E 2022) targets a narrower, high-severity
-problem: detecting container *escape* specifically, using kernel-level
-provenance capture to identify cross-namespace events and a
-`privileged_flow` rule evaluated against a CVE benchmark suite of real
-escape exploits. UNICORN [5] (Han et al., NDSS 2020) is a general,
-non-Kubernetes-specific host-level anomaly detector that builds and
-incrementally sketches whole-system provenance graphs to detect
-long-running, low-and-slow APT campaigns without predefined signatures.
-P4Control [8] (Bajaber et al., IEEE S&P 2024) takes yet another
-adjacent approach, enforcing decentralized information-flow-control
-policy at line rate using programmable (P4) network switches combined
-with a lightweight host-side eBPF primitive — a prevention mechanism at
-the network layer rather than a technique-level detection system. All
-three are included here because they represent provenance- and
-information-flow-based schools of thought architecturally adjacent to
-CAGE's own pod-identity-correlated event graph; none targets Kubernetes'
-specific control-plane/kernel duality the way CAGE does, and none
-performs technique-level MITRE ATT&CK mapping across a broad technique
-catalog.
+problem: detecting container *escape* specifically, defining what
+constitutes a cross-namespace event and proposing a `privileged_flow`
+rule evaluated against a benchmark of real container-escape CVEs,
+reporting near-perfect accuracy with no false negatives. UNICORN [5]
+(Han et al., NDSS 2020) is a general, non-Kubernetes-specific
+host-level anomaly detector that incrementally sketches whole-system
+provenance graphs to catch long-running, low-and-slow APT campaigns
+without predefined signatures. KAIROS [12] (Cheng et al., IEEE S&P
+2024) extends this line of work with a graph-neural-network-based
+encoder-decoder that learns how a provenance graph evolves over time,
+aiming to detect attacks that cross application boundaries without
+prior knowledge of their signatures while still reconstructing a
+human-readable summary of what happened. Notably, Thomas Pasquier
+co-authors PACED, UNICORN, and KAIROS, so these three systems are part
+of one continuous research thread on provenance-based detection that
+CAGE sits adjacent to rather than inside. P4Control [8] (Bajaber et
+al., IEEE S&P 2024) takes a different approach again, enforcing
+decentralized information-flow-control policy at line rate using
+programmable (P4) network switches combined with a lightweight
+host-side eBPF primitive, a prevention mechanism rather than a
+detection one. None of these four systems is Kubernetes-specific, and
+none performs technique-level MITRE ATT&CK mapping across a broad
+catalog; CAGE's contribution here is orthogonal to theirs rather than a
+direct improvement on any one of them.
+
+### D. Multi-Stage Attack and Alert Correlation
+
+A separate line of work addresses the analyst-facing side of
+multi-stage attacks: the sheer alert volume a real deployment
+generates. Wilkens et al. [13] synthesize kill chain state machines
+from network alert streams, condensing up to 446,458 raw alerts from
+the CSE-CIC-IDS2018 dataset into roughly 700 human-reviewable attack
+scenario graphs, using network topology and zone directionality to
+infer plausible attack-stage transitions. Their correlation runs over
+general enterprise network alerts rather than Kubernetes-specific
+events, and it discovers open-ended scenario graphs rather than
+matching against a fixed, documented catalog. CAGE's chain correlator
+addresses a structurally similar problem, reducing per-technique alerts
+to a small number of high-confidence chain alerts, but keys correlation
+to a Kubernetes pod UID and evaluates against five specific,
+pre-documented ATT&CK chains rather than deriving arbitrary scenario
+graphs from network-layer alerts alone.
+
+### E. Positioning of CAGE
 
 **Table 6** (`evaluation/person_b/tables/table6_related_work.md`)
 summarizes this comparison along five axes: telemetry sources, multi-hop
@@ -300,15 +348,17 @@ visualization, and false-positive mitigation strategy. It is explicitly
 a **qualitative** comparison against published system descriptions
 (cross-checked directly against each cited paper's own text, correcting
 an earlier draft's misattributed telemetry sources for K8NTEXT and
-PACED), not a quantitative benchmark — no other tool was run against
+PACED), not a quantitative benchmark; no other tool was run against
 CAGE's own attack set in this project's cluster. The single highest-value
 quantitative addition identified for a future revision is a head-to-head
 run of vanilla Tetragon (CAGE's own eBPF backend, already present in
 this project's infrastructure) against the same attack set used in
 E1/E2, to produce a directly comparable precision/recall/latency
-baseline — this depends on the `ABLATION_MODE=tetragon_only`
-infrastructure the E2 experiment already owns, so it was deliberately
-not attempted in this pass to avoid duplicating that work.
+baseline. This requires re-running the E1/E2 attack suite a second time
+against a plain, non-CAGE Tetragon deployment in the same cluster,
+which was out of scope for this evaluation cycle's time budget; we
+present it here as a concrete, low-effort next step rather than as a
+substitute already covered by the qualitative comparison above.
 
 ---
 
@@ -1037,7 +1087,8 @@ https://tetragon.io/
 
 [3] M. Franzil, V. Armani, L. A. Dias Knob, and D. Siracusa, "Sharpening
 Kubernetes audit logs with context awareness," *Computer Networks*, vol.
-276, Feb. 2026. Also available: arXiv:2506.16328.
+276, art. no. 111890, Feb. 2026, doi: 10.1016/j.comnet.2025.111890.
+Also available: arXiv:2506.16328.
 
 [4] M. Abbas, S. Khan, A. Monum, F. Zaffar, R. Tahir, D. Eyers, H.
 Irshad, A. Gehani, V. Yegneswaran, and T. Pasquier, "PACED:
@@ -1070,16 +1121,43 @@ programmable switches and eBPF," in *Proc. 2024 IEEE Symp. Security and
 Privacy (S&P)*, San Francisco, CA, USA, May 2024. Also available:
 arXiv:2405.14970.
 
-*(Additional references needed before submission: the MITRE ATT&CK
-framework itself, the Wilson score interval's original source [E. B.
-Wilson, "Probable inference, the law of succession, and statistical
-inference," J. Amer. Statist. Assoc., vol. 22, no. 158, pp. 209–212,
-1927] if cited by name in the methodology, and any further general
-Kubernetes/container-security survey citations a reviewer might expect
-in §I's opening framing. At least 10-15 more citations beyond the
-direct related-work comparison are standard for an IEEE Access paper of
-this scope — a full literature-review pass is recommended before
-submission.)*
+[9] MITRE Corporation, "MITRE ATT&CK." [Online]. Available:
+https://attack.mitre.org/. Accessed: Jul. 27, 2026.
+
+[10] S. Roy, E. Panaousis, C. Noakes, A. Laszka, S. Panda, and G.
+Loukas, "SoK: The MITRE ATT&CK framework in research and practice,"
+arXiv preprint arXiv:2304.07411, 2023. Submitted to *2024 IEEE Symp.
+Security and Privacy (S&P)*.
+
+[11] S. Ghimire, N. Bhurtel, R. Sahani, and S. Jha, "eBPF-PATROL:
+Protective agent for threat recognition and overreach limitation using
+extended Berkeley Packet Filter (eBPF) in containerized and virtualized
+environments," arXiv preprint arXiv:2511.18155, 2025.
+
+[12] Z. Cheng, Q. Lv, J. Liang, Y. Wang, D. Sun, T. Pasquier, and X.
+Han, "KAIROS: Practical intrusion detection and investigation using
+whole-system provenance," in *Proc. 2024 IEEE Symp. Security and
+Privacy (S&P)*, San Francisco, CA, USA, May 2024, pp. 3533–3551. Also
+available: arXiv:2308.05034.
+
+[13] F. Wilkens, F. Ortmann, S. Haas, M. Vallentin, and M. Fischer,
+"Multi-stage attack detection via kill chain state machines," in *Proc.
+3rd Workshop on Cyber-Security Arms Race (CYSARM '21)*, Virtual Event,
+Republic of Korea, Nov. 2021, pp. 13–24. Also available:
+arXiv:2103.14628.
+
+*(Additional references still needed before submission: the Wilson
+score interval's original source [E. B. Wilson, "Probable inference,
+the law of succession, and statistical inference," J. Amer. Statist.
+Assoc., vol. 22, no. 158, pp. 209–212, 1927], to be cited by name once
+§V's methodology section gets its own citation pass, and any further
+general Kubernetes/container-security survey citations a reviewer might
+expect in §I's opening framing. [9]-[13] were added during the Related
+Work pass and verified by direct retrieval of each source's own text or
+abstract (full first-page text extracted for [4], [11], [12], and [13];
+verbatim abstract for [1]-[10]), the same standard applied to [1]-[8];
+further citations should meet the same bar rather than being added for
+count alone.)*
 
 ---
 
