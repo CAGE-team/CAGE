@@ -18,53 +18,37 @@ contributors' original drafting styles.
 
 ## Abstract
 
-Kubernetes security has not kept pace with Kubernetes adoption: 89% of
-organizations report at least one container- or Kubernetes-related
-security incident in the past year, and newly deployed clusters can draw
-their first attack probe within minutes of coming online. Existing
-runtime security tools address this with a single telemetry source —
-eBPF-based tracers see kernel-level process, network, and capability
-events but are blind to Kubernetes control-plane actions (RBAC changes,
-`kubectl exec` sessions, secret reads via the API server); audit-log
-tools see every control-plane action but are blind to what happens
-*inside* a container once a session or connection is established. This
-split lets multi-stage attacks that cross both layers evade full
-observation by either kind of tool, and prevents partial observations
-from either source from being linked into one causal chain in the first
-place. We present CAGE (Cross-layer Attack Graph Engine), a Kubernetes
-runtime security system that fuses eBPF telemetry (via Tetragon) with
-the Kubernetes audit log, using the pod UID — a value immutable for a
-pod's lifetime, unlike its IP address or name — as an explicit,
-first-class correlation key across both sources. CAGE detects 11 MITRE
-ATT&CK techniques spanning both telemetry sources and correlates them
-into five documented multi-hop attack chains in real time, exposed
-through a live dashboard. We evaluate CAGE entirely on live Kubernetes
-infrastructure along two axes. On detection quality: per-technique
-recall reaches 100% across all 11 techniques (180 trials); a
-three-condition, 330-trial ablation study reveals a perfectly
-complementary telemetry split — every technique is detected with 0%
-probability under one single-source configuration and 100% under the
-fused one, and no single source covers more than six of the eleven,
-evidencing that cross-layer fusion is structurally required, not merely
-beneficial; all five attack chains re-fire reliably across ten
-independent episodes each (50/50 trials); and each of CAGE's
-threshold-based detectors draws a clean, disclosed line between certain
-evasion and certain detection at its documented default threshold. On
-systems characteristics: CAGE detects audit-log-sourced techniques in a
-mean 0.19s and eBPF-sourced techniques in a highly consistent 27.96s
-plateau (N=20 trials each), imposes a flat ~3.2% CPU / ~135MB RSS
-overhead regardless of load, holds its pod-monitoring subsystem's cycle
-time within a narrow band across a 1-to-16 scan-target-pod range with no
-statistically distinguishable growth, and functionally recovers from all
-three tested classes of injected infrastructure fault in 15/15 trials.
-We further report multiple real detection-logic and evaluation-tooling
-defects, discovered independently by both halves of this evaluation
-effort, that surfaced only once each evaluation was executed against
-live infrastructure rather than assessed through code review alone —
-a finding with implications for how systems of this kind should be
-evaluated more broadly.
+A shell spawned inside a Kubernetes pod is invisible to the Kubernetes
+audit log, just as the `kubectl exec` command that spawned it is
+invisible to eBPF telemetry. Most Kubernetes runtime security tools
+instrument only one of these layers, so an attacker whose intrusion
+crosses both is only ever half observed, and the two halves are never
+linked. This paper presents CAGE (Cross-layer Attack Graph Engine),
+which fuses eBPF telemetry from Tetragon with the Kubernetes audit log
+using the pod UID, a value fixed for a pod's lifetime, as the
+correlation key across both sources. CAGE detects 11 MITRE ATT&CK
+techniques spanning both sources and correlates matching sequences into
+five documented multi-hop attack chains in real time. We evaluate CAGE
+entirely on a live cluster rather than in simulation. Per-technique
+recall reaches 100% across all 11 techniques (180 trials). A
+three-condition, 330-trial ablation study shows a perfectly
+complementary split: every technique fires at 0% under one
+single-source configuration and 100% under the fused one, and no single
+source covers more than six of the eleven, so fusion is a structural
+requirement, not an incremental gain. All five attack chains re-fire
+correctly across ten independent episodes each, and CAGE's
+threshold-based detectors draw a clean, disclosed line between certain
+evasion and certain detection at their default thresholds. CAGE detects
+audit-log-sourced techniques in a mean 0.19 seconds and eBPF-sourced
+techniques at a consistent 27.96-second plateau, adds a flat overhead
+of roughly 3.2% CPU and 135MB of memory regardless of load, holds
+pod-monitoring cycle time stable from 1 to 16 monitored pods, and
+recovers functionally from all 15 injected infrastructure-fault trials.
+We also report several real defects in our own detection logic and
+evaluation tooling, surfaced only once experiments ran against live
+infrastructure rather than assessed through code review.
 
-**Index Terms**—Kubernetes security, eBPF, runtime intrusion detection,
+**Index Terms:** Kubernetes security, eBPF, runtime intrusion detection,
 audit log analysis, attack chain correlation, MITRE ATT&CK, cross-layer
 telemetry fusion, cloud-native security, resource overhead, fault
 tolerance.
@@ -73,170 +57,192 @@ tolerance.
 
 ## I. Introduction
 
-Kubernetes has become the de facto standard for orchestrating
-containerized workloads in cloud and enterprise environments, valued for
-the scalability and operational automation it brings to deployments that
-would otherwise require substantial manual effort to manage across many
-nodes. That ubiquity has made Kubernetes clusters an attractive and
-heavily probed target: a 2024 industry survey of 600 DevOps,
-engineering, and security professionals found that 89% of organizations
-had experienced at least one container- or Kubernetes-related security
-incident in the preceding year, and 45% specifically reported a runtime
-incident [6]. Independent honeypot research on managed Kubernetes
-offerings corroborates how quickly this exposure is exploited in
-practice: newly created clusters received their first attack attempt
-within 18 minutes on Microsoft AKS and within 28 minutes on Amazon EKS
-[7]. Detecting the techniques attackers use once inside a cluster —
-credential theft via the metadata or secrets API, lateral movement
-between pods, privilege escalation through misconfigured RBAC or
-dangerous container capabilities, container escape — requires visibility
-at two structurally different layers, and existing tooling has largely
-chosen to instrument only one.
+A shell spawned inside a Kubernetes pod leaves no trace in the
+Kubernetes audit log. The `kubectl exec` command that opened it leaves
+no trace in eBPF telemetry. This gap between what happens at the kernel
+and what happens at the control plane is not a minor blind spot; it
+sits directly on the path that many real intrusions take, and it exists
+in the large majority of Kubernetes deployments running today.
+Kubernetes has become the default way organizations run containerized
+workloads at scale, and that popularity carries a cost. A 2024 industry
+survey of 600 DevOps, engineering, and security professionals found
+that 89% of organizations had experienced at least one container- or
+Kubernetes-related security incident in the previous year, with 45%
+specifically reporting a runtime incident [6]. Independent honeypot
+measurements on managed Kubernetes offerings show how little time
+defenders have to react once a cluster is exposed to the internet:
+newly created clusters received their first attack probe within 18
+minutes on Microsoft AKS and within 28 minutes on Amazon EKS [7].
+Detecting what an attacker does after gaining a foothold, reading a
+secret through the metadata or secrets API, moving laterally between
+pods, escalating privileges through a misconfigured role or a dangerous
+container capability, escaping a container altogether, requires
+visibility at two layers that behave very differently, and most
+existing tools commit to only one of them. Fig. 1 summarizes what each
+layer sees and misses, and how CAGE bridges the two.
 
-**Kernel-level telemetry** (via eBPF) sees what a process actually does
-once it is running inside a container — spawning a shell, opening a TCP
-connection, invoking a dangerous syscall — but has no native concept of
-a Kubernetes API action; a `kubectl exec` or a secret read via the API
-server produces no distinguishing kernel event of its own. Falco [1] and
-Cilium Tetragon [2], two of the most widely adopted open-source runtime
-security tools for Kubernetes, both instrument the kernel — via eBPF or
-a kernel-module probe — and evaluate syscall- and process-level events
-against a rule set, independently of any control-plane signal.
-**Control-plane telemetry** (the Kubernetes audit log) sees every API
-action with full RBAC and identity context, but is blind to what happens
-after a connection is established inside a container — it cannot see a
-shell being spawned or a lateral network connection between two pods.
-K8NTEXT [3] takes this complementary approach, reconstructing the causal
-structure the Kubernetes audit log otherwise scatters across thousands
-of loosely linked entries — but its telemetry is the audit log alone.
-Each of these tools is, within its own telemetry source, mature and
-effective. None of them, by design, looks at the other source at all.
+*Fig. 1. The cross-layer visibility gap. eBPF and the Kubernetes audit
+log each see roughly half of an attacker's actions inside a cluster;
+CAGE joins the two streams on the pod UID, the one identifier that is
+stable across both.*
 
-This single-source design carries a structural limitation that no amount
-of tuning within one source can resolve, for two related reasons. First,
-several attacker-relevant actions are observable from only one side of
-the kernel/control-plane boundary: a `kubectl exec` into a pod is an
-audit-log event with no kernel-level footprint of its own, while the
-shell that command spawns inside the pod is a kernel-level event with no
-corresponding audit-log entry. Second, and more consequentially, several
-of these single-sided events are individually indistinguishable from
-ordinary administrative activity. An operator's routine `kubectl exec`
-into a pod to check its health looks, from the audit log alone, identical
-to an attacker's remote-execution foothold; an ordinary interactive
-debugging shell looks, from eBPF telemetry alone, identical to a
-post-exploitation shell. Observed together and attributed to the same
-workload, the sequence — remote exec, followed by a shell, followed by a
-secret read from inside that shell — is a materially stronger signal
-than any one event alone. But a tool that instruments only one side of
-that boundary never has the opportunity to make that observation,
-regardless of how well it is tuned, and critically, has no
-source-independent identity to join partial observations from the other
-side on even if it could see them.
+Kernel-level telemetry, gathered through eBPF, sees what a process
+actually does once it is running inside a container: a shell being
+spawned, a TCP connection being opened, a dangerous syscall being
+invoked. It has no native concept of a Kubernetes API action, so a
+`kubectl exec` session or a secret read through the API server produces
+nothing for it to observe. Falco [1] and Cilium Tetragon [2], the two
+most widely deployed open-source runtime security tools for Kubernetes,
+both work this way. They instrument the kernel through eBPF or a
+kernel-module probe and evaluate each syscall- or process-level event
+against a rule set, independently of anything happening at the control
+plane.
 
-Existing work has not closed this gap. Falco and Tetragon operate
-exclusively on eBPF telemetry and evaluate each event independently, with
-no mechanism to correlate a kernel-side event with a control-plane one.
-K8NTEXT operates exclusively on the audit log, and while it reconstructs
-which control-plane events a given action caused, it has no visibility
-into what happened inside the pod as a result — it cannot see the shell
-that a correlated `kubectl exec` spawned. PACED [4], UNICORN [5], and
-P4Control [8] represent a broader provenance- and information-flow-based
-school of thought that CAGE is architecturally adjacent to, but none
-closes this specific gap: PACED targets a single technique family
-(container escape) via kernel provenance capture; UNICORN is a
-general-purpose, non-Kubernetes-specific anomaly detector built for
-slow-acting APT campaigns rather than technique-level classification
-against a broad catalog; and P4Control enforces information-flow policy
-at the network layer via programmable switches, a different problem
-(prevention via line-rate enforcement) from the after-the-fact,
-technique-level detection and chain correlation this paper addresses.
-None of these systems fuses eBPF telemetry with the Kubernetes audit log
-through a stable, workload-level identity key to detect and correlate a
-broad MITRE ATT&CK technique catalog — which is the specific gap this
-paper addresses.
+Control-plane telemetry, the Kubernetes audit log, sees the opposite
+half of the picture. It records every API action along with full
+identity and RBAC context, but it is blind to what happens once a
+connection or session is actually established inside a container; it
+cannot see a shell being spawned, nor a lateral connection opened
+between two pods. K8NTEXT [3] works from this side of the boundary,
+reconstructing the causal structure that the audit log otherwise
+scatters across thousands of loosely related entries, but its telemetry
+remains the audit log and nothing else. Each of these tools is mature
+and effective within its own telemetry source. None of them looks at
+the other source at all, and none was designed to.
 
-CAGE closes this gap by using the Kubernetes pod UID — resolved once via
-the Kubernetes watch API and cached, not assumed or hardcoded per
-pod-name or namespace — as an explicit correlation key across both the
-Tetragon eBPF stream and the Kubernetes audit-log stream. Events from
-either source that share a pod UID are linked in a single causal graph;
-sequences of technique detections that match one of five documented
-multi-hop attack patterns are escalated to a CRITICAL correlated-chain
-alert, distinct from and stronger evidence than any of the individual
-per-technique alerts on their own.
+The cost of this single-source design is not simply that some events go
+unseen. It is that many of the events each tool does see are, on their
+own, ambiguous. An operator's routine `kubectl exec` into a pod to check
+its health is indistinguishable, from the audit log alone, from an
+attacker establishing a remote-execution foothold. An ordinary
+interactive debugging shell looks, from eBPF telemetry alone, exactly
+like a post-exploitation shell. What separates the two is not any
+single event but the sequence: a remote exec, followed shortly by a
+shell, followed by a secret read from inside that shell, attributed the
+whole time to the same workload. That sequence is a materially stronger
+signal than any of its individual parts. A tool that instruments only
+one side of the kernel and control-plane boundary never gets the chance
+to observe it, no matter how carefully its rules are tuned, and even if
+it somehow could see across the boundary, it has no source-independent
+notion of workload identity with which to link the two observations
+together.
 
-This paper evaluates CAGE along two axes, each organized around explicit
-research questions and answered entirely with live-cluster trials rather
-than simulation.
+This gap has not been closed by prior work, although several projects
+sit close to it. Falco and Tetragon operate exclusively on eBPF
+telemetry and score each event on its own, with no mechanism to tie a
+kernel-side event to a control-plane one. K8NTEXT operates exclusively
+on the audit log; it can reconstruct which control-plane events a given
+action caused, but it has no visibility into what happened inside the
+pod as a result, so it cannot see the shell that a correlated `kubectl
+exec` spawned. PACED [4], UNICORN [5], and P4Control [8] sit in a broader family of
+provenance- and information-flow-based systems that CAGE is
+architecturally closer to, but each targets a narrower or different
+problem: PACED detects only container escape through kernel provenance
+capture, UNICORN is a general-purpose, non-Kubernetes anomaly detector
+built for slow APT campaigns rather than technique-level classification,
+and P4Control enforces information-flow policy at the network layer, a
+prevention problem solved through line-rate enforcement rather than the
+after-the-fact detection and chain correlation this paper addresses. No
+existing system fuses eBPF telemetry with the Kubernetes audit log
+through a stable, workload-level identity key in order to detect and
+correlate a broad MITRE ATT&CK technique catalog.
+
+CAGE closes this gap using the Kubernetes pod UID as an explicit
+correlation key across both telemetry sources. Unlike a pod's name or
+IP address, the UID is assigned once by the Kubernetes API server and
+stays fixed for the pod's entire lifetime, so it can be resolved
+through the watch API, cached, and used to tie an eBPF-sourced event and
+an audit-log-sourced event back to the same workload without guessing.
+Events from either source that share a pod UID are linked into a single
+causal graph, and sequences of technique detections that match one of
+five documented multi-hop attack patterns are escalated into a CRITICAL
+correlated-chain alert, which carries stronger evidentiary weight than
+any single per-technique alert on its own.
+
+We evaluate CAGE along two axes, each organized around explicit
+research questions and answered entirely through live-cluster trials
+rather than simulation. These two axes are not independent concerns: a
+detector that catches every attack but adds unpredictable latency,
+consumes unbounded resources, or fails silently when part of the
+infrastructure goes down is not something an operator could actually
+run in production, so we treat detection quality and systems
+characteristics as two halves of a single evaluation rather than as
+separate studies.
 
 *Detection quality:*
-- **RQ1.** What is CAGE's per-technique detection accuracy, and how does
-  that accuracy differ between techniques with and without a deliberate
-  scope exclusion? (§VI-A)
-- **RQ2.** Does any single telemetry source achieve full detection
-  coverage across CAGE's technique catalog, or is cross-layer fusion
-  structurally required to do so? (§VI-B)
-- **RQ3.** Does CAGE's chain correlator reliably re-detect independent
-  instances of the same multi-step attack against the same workload,
-  validating its episode-scoped deduplication design? (§VI-C)
-- **RQ4.** For CAGE's threshold-based detectors, where exactly does the
-  boundary between detection and evasion sit relative to the documented
+- **RQ1.** How accurately does CAGE detect each of its eleven
+  techniques individually, and does that accuracy hold consistently
+  across techniques with a deliberate scope exclusion as well as those
+  without one? (§VI-A)
+- **RQ2.** Is full detection coverage achievable from either telemetry
+  source alone, or does covering the entire technique catalog
+  structurally require fusing both? (§VI-B)
+- **RQ3.** Does CAGE's chain correlator detect independent instances of
+  the same multi-step attack against the same workload reliably and
+  repeatedly, confirming that its episode-scoped deduplication design
+  works as intended? (§VI-C)
+- **RQ4.** For CAGE's threshold-based detectors, exactly where does the
+  line between evasion and detection fall relative to the documented
   default thresholds? (§VI-G)
 
 *Systems characteristics:*
-- **RQ5.** What is CAGE's end-to-end detection latency, and does it
-  differ systematically by telemetry source? (§VI-D)
-- **RQ6.** What resource overhead does CAGE impose on its host under
-  idle versus active attack load? (§VI-E)
-- **RQ7.** Does CAGE's pod-to-pod network-monitoring subsystem scale
-  gracefully as the number of monitored pods increases? (§VI-F)
-- **RQ8.** Does CAGE functionally recover from realistic infrastructure
-  faults without manual intervention? (§VI-H)
+- **RQ5.** What is CAGE's end-to-end detection latency, and does that
+  latency depend systematically on which telemetry source produced the
+  underlying event? (§VI-D)
+- **RQ6.** How much CPU and memory overhead does CAGE add to its host,
+  both at idle and under active attack load? (§VI-E)
+- **RQ7.** Does CAGE's pod-to-pod network-monitoring subsystem continue
+  to perform consistently as the number of monitored pods grows? (§VI-F)
+- **RQ8.** Can CAGE recover its functionality after realistic
+  infrastructure faults without an operator having to intervene?
+  (§VI-H)
 
 **Contributions.** The contributions of this paper are summarized as
 follows:
 
 - We present CAGE, a cross-layer runtime security architecture that
   fuses eBPF process and network telemetry with Kubernetes audit-log
-  events through a live, watch-API-backed pod-identity cache, detecting
-  11 MITRE ATT&CK techniques and correlating them into five documented
-  multi-hop attack chains with episode-scoped deduplication (§III–IV).
+  events through a live, watch-API-backed pod-identity cache. CAGE
+  detects 11 MITRE ATT&CK techniques and correlates them into five
+  documented multi-hop attack chains with episode-scoped deduplication
+  (§III-IV).
 - We evaluate CAGE's detection quality on live infrastructure against
-  four explicit research questions, reporting per-technique detection
-  accuracy with Wilson-confidence-interval-backed statistics, a
-  telemetry-source ablation study, chain-correlation reliability across
-  independent episodes, and an evasion-boundary characterization of the
-  system's threshold-based detectors (§VI-A–C, VI-G).
+  four explicit research questions, reporting per-technique accuracy
+  backed by Wilson confidence intervals, a telemetry-source ablation
+  study, chain-correlation reliability across independent episodes, and
+  an evasion-boundary characterization of the system's threshold-based
+  detectors (§VI-A through §VI-C and §VI-G).
 - We evaluate CAGE's systems characteristics on the same live
   infrastructure, reporting detection latency, resource overhead,
   monitoring-subsystem scalability, and functional recovery from
-  injected infrastructure faults, each with appropriate statistical
-  confidence intervals rather than point estimates alone (§VI-D–F,
-  VI-H).
-- We report two systems findings that revise or validate specific design
-  decisions rather than merely characterizing performance: a highly
-  consistent ~28-second Tetragon-sourced detection-latency plateau whose
-  dependence on connection age remains an open, honestly-reported
-  question (§VI-D); and direct evidence that a concurrent-polling fix to
-  the pod-to-pod network monitor holds cycle time flat across the tested
-  scale range, correcting a design that could previously split a single
-  scan-burst attack across two polling cycles and evade detection
+  injected infrastructure faults, each with appropriate confidence
+  intervals rather than bare point estimates (§VI-D through §VI-F and
+  §VI-H).
+- We report two systems findings that revise or confirm specific design
+  decisions rather than simply characterizing performance: a highly
+  consistent 27.96-second Tetragon-sourced detection-latency plateau
+  whose relationship to connection age we report honestly as an open
+  question (§VI-D), and direct evidence that a concurrent-polling fix to
+  the pod-to-pod network monitor keeps cycle time flat across the tested
+  scale range, correcting an earlier design that could split a single
+  scan-burst attack across two polling cycles and let it evade detection
   entirely (§VI-F).
 - We report and analyze a set of real detection-logic and
-  evaluation-tooling defects, discovered independently across both
-  halves of this evaluation effort, that were found only by executing
-  each evaluation against live infrastructure rather than through code
-  review or synthetic-data testing, and argue this generalizes as a
-  methodological requirement for evaluating systems whose correctness
-  depends on multi-source event timing and cross-process state (§VII).
+  evaluation-tooling defects, found independently across both halves of
+  this evaluation effort, that surfaced only once each experiment ran
+  against live infrastructure rather than under code review or
+  synthetic testing. We argue this generalizes into a methodological
+  point: systems whose correctness depends on multi-source event timing
+  and cross-process state need to be evaluated against live
+  infrastructure, not only reasoned about on paper (§VII).
 
-The remainder of this paper is organized as follows. Section II surveys
+The rest of this paper is organized as follows. Section II surveys
 related work. Section III states the threat model. Section IV describes
 CAGE's architecture. Section V details the evaluation methodology.
 Section VI presents results for each research question. Section VII
-discusses lessons from building the evaluation infrastructure itself.
-Section VIII states limitations and threats to validity. Section IX
-concludes.
+discusses lessons learned from building the evaluation infrastructure
+itself. Section VIII states limitations and threats to validity.
+Section IX concludes.
 
 ---
 
@@ -943,7 +949,10 @@ the live target system risks reporting fabricated confidence.
   hand-curating real timestamps from a server log rather than being
   auto-generated from the trial CSVs like the other figures, and was not
   completed in this evaluation cycle. The plotting script and CSV
-  template exist (`evaluation/person_a/plots/plot_fig1_chain_timeline.py`);
+  template exist (`evaluation/person_a/plots/plot_fig1_chain_timeline.py`,
+  a name left over from before the Introduction's visibility-gap diagram
+  claimed the Fig. 1 slot; it would be inserted near §VI-C and numbered
+  accordingly once built, with every subsequent figure shifted by one);
   populating it with real data from an E1 or E3 run is a short remaining
   task before final submission.
 - **Tetragon delivery-latency mechanism not conclusively root-caused.**
