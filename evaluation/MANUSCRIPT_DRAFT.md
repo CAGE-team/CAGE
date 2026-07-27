@@ -341,24 +341,47 @@ graphs from network-layer alerts alone.
 
 ### E. Positioning of CAGE
 
-**Table 6** (`evaluation/person_b/tables/table6_related_work.md`)
-summarizes this comparison along five axes: telemetry sources, multi-hop
-chain detection, Kubernetes pod-identity correlation, live attack-graph
-visualization, and false-positive mitigation strategy. It is explicitly
-a **qualitative** comparison against published system descriptions
-(cross-checked directly against each cited paper's own text, correcting
-an earlier draft's misattributed telemetry sources for K8NTEXT and
-PACED), not a quantitative benchmark; no other tool was run against
-CAGE's own attack set in this project's cluster. The single highest-value
-quantitative addition identified for a future revision is a head-to-head
-run of vanilla Tetragon (CAGE's own eBPF backend, already present in
-this project's infrastructure) against the same attack set used in
-E1/E2, to produce a directly comparable precision/recall/latency
-baseline. This requires re-running the E1/E2 attack suite a second time
-against a plain, non-CAGE Tetragon deployment in the same cluster,
-which was out of scope for this evaluation cycle's time budget; we
-present it here as a concrete, low-effort next step rather than as a
-substitute already covered by the qualitative comparison above.
+Table II summarizes this comparison along five axes: telemetry
+sources, multi-hop chain detection, Kubernetes pod-identity
+correlation, live attack-graph visualization, and false-positive
+mitigation strategy. Falco and vanilla Tetragon are included alongside
+the systems discussed above because they are the two most directly
+comparable deployed tools: Falco as the dominant open-source
+Kubernetes runtime-security tool, and vanilla Tetragon as the
+single-source baseline CAGE itself is built on and extends.
+
+**TABLE II. Related-Work Feature Comparison.**
+
+| System | Telemetry Sources | Multi-Hop Chain Detection | Kubernetes Pod-Identity Correlation | Live Attack-Graph Dashboard | False-Positive Mitigation |
+|---|---|---|---|---|---|
+| K8NTEXT | Kubernetes audit log only | Context-grouping across correlated actions, not MITRE-technique-level chain detection | Not specified in the published evaluation | Not applicable | Inference rules plus a machine-learning grouping model (over 95% accuracy) |
+| UNICORN | Host-level provenance graph, source-agnostic; not confirmed eBPF-based | Anomaly-based long-range correlation, not Kubernetes-specific, not technique-level | Not applicable; not Kubernetes-scoped | Not applicable | Provenance-graph anomaly scoring |
+| PACED | Kernel provenance capture | Single-hop; container-escape events only | Not specified | Not applicable | `privileged_flow` rule evaluated against a CVE benchmark |
+| KAIROS | Host-level provenance graph via graph neural network | Anomaly-based, cross-application scope; not Kubernetes-specific, not technique-level | Not applicable; not Kubernetes-scoped | Not applicable | Learned graph-embedding anomaly scoring |
+| P4Control | Programmable (P4) network switches plus lightweight host eBPF | Single-hop; in-network information-flow-control label propagation | Not applicable; not Kubernetes-scoped | Not applicable | DIFC label-based line-rate enforcement |
+| Falco | eBPF or kernel-module syscall monitoring | None; single-event rules | Partial (Kubernetes metadata enrichment on syscall events, not a correlation key) | Not built in (a separate, optional UI component exists) | Static rule tuning; no built-in behavioral-burst thresholds |
+| Vanilla Tetragon | eBPF only (process exec, network, file, capabilities) | None; per-policy alerts with no cross-event correlation | Native Kubernetes metadata on events, but not used as an explicit cross-source join key | Hubble UI, network-flow visualization; not an attack-chain view | Per-policy filtering only |
+| **CAGE** | **eBPF (Tetragon) plus Kubernetes audit log plus pod-UID watch** | **Multi-hop; five documented chain types** | **Pod UID as an explicit correlation key across all sources** | **Yes: attack-graph canvas, kill-chain stepper, MITRE matrix, per-source health status** | **Namespace-scope exclusion, scan-burst thresholds for T1610, remote-exec correlation windows for T1059** |
+
+This is explicitly a qualitative comparison against each system's own
+published description, not a quantitative benchmark; no other tool was
+run against CAGE's own attack set in this project's cluster. The
+single highest-value quantitative addition identified for a future
+revision is a head-to-head run of vanilla Tetragon (CAGE's own eBPF
+backend, already present in this project's infrastructure) against the
+same attack set used in E1/E2, to produce a directly comparable
+precision/recall/latency baseline. This requires re-running the E1/E2
+attack suite a second time against a plain, non-CAGE Tetragon
+deployment in the same cluster, which was out of scope for this
+evaluation cycle's time budget; we present it here as a concrete,
+low-effort next step rather than as a substitute already covered by the
+qualitative comparison above.
+
+*(Table numbering note: this table is provisionally labeled Table II
+to match its position in reading order; Table I currently appears
+later, in Section IV. A final table- and figure-numbering pass across
+the full manuscript, consistent with the Fig. 1 renumbering already
+flagged in Section VIII, is needed before submission.)*
 
 ---
 
@@ -477,7 +500,7 @@ systems-characteristics) run against the same `kind`-provisioned 3-node
 cluster (1 control-plane + 2 workers) on a single host, Tetragon v1.7.0,
 Kubernetes v1.30.0, kernel 6.6.87.2 (WSL2, Linux subsystem on Windows),
 `ABLATION_MODE=fused` (all consumers active) unless a specific experiment
-(E2, or a future quantitative Table 6 baseline) deliberately varies it.
+(E2, or a future quantitative Table II baseline) deliberately varies it.
 
 **Metrics and their definitions.** For per-technique detection (E1) and
 chain correlation (E3), a **true positive** is a malicious trial that
@@ -990,7 +1013,7 @@ the live target system risks reporting fabricated confidence.
   evaluation cycle for time. Neither affects the validity of the results
   that are included; both would add depth to, respectively, §VI-C and
   §VI-G.
-- **No quantitative baseline.** Table 6 is qualitative; a head-to-head
+- **No quantitative baseline.** Table II is qualitative; a head-to-head
   vanilla-Tetragon comparison (the cheapest quantitative addition,
   dependent on the E2 ablation infrastructure) remains future work.
 - **Attack-chain timeline figure not yet built.** A planned illustrative
