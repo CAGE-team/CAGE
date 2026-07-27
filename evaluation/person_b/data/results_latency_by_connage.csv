@@ -1,0 +1,6 @@
+connection_age_target_sec,connection_age_actual_sec,trial,latency_sec,source
+5,6.05,1,2.058,tetragon
+15,15.0,1,1.232,tetragon
+30,30.0,1,6.088,tetragon
+60,60.0,1,0.174,tetragon
+120,120.0,1,14.227,tetragon

@@ -7,3 +7,4 @@ week4/eval_*.log
 inspect.json
 *.log
 .claude/settings.local.json
+evaluation/person_b/*_COMPLETE
