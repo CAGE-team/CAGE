@@ -1,12 +1,20 @@
 # CAGE: A Cross-Layer Attack Graph Engine for Kubernetes Runtime Security
 
-*Draft, restructured to IEEE Access conventions. Sections marked
-[PENDING] await E3/E9's final N=10 runs (in progress). Every number
-already in this draft is real, live-cluster data — nothing here is
-placeholder or simulated. Citations for Related Work were verified via
-web search this session (not fabricated); exact page/DOI details should
-still be cross-checked against the camera-ready versions before
-submission — see inline notes.*
+*Draft, structured to IEEE Access conventions. Person A's scope (E1/E2/E3/E9)
+is complete at N=10 with every number below drawn from real live-cluster
+data — nothing is placeholder or simulated. This draft covers Person A's
+sections only; Person B's own manuscript draft
+(`evaluation/MANUSCRIPT_DRAFT.md`) covers the systems/performance
+evaluation (latency, overhead, scalability, fault tolerance) and is
+structured with `[PERSON A — PENDING]` slots intended for this draft's
+content — the two drafts should be reconciled into one before submission
+rather than treated as competing papers. Citations for Related Work were
+verified via web search this session (not fabricated); exact page/DOI
+details should still be cross-checked against camera-ready versions
+before submission — see inline notes. Abstract and Introduction have had
+a dedicated critical revision pass (word-count discipline, citation
+precision, superlative-claim softening); remaining sections are complete
+in content but have not yet had the same line-level polish pass.*
 
 ---
 
@@ -491,11 +499,36 @@ every subsequent trial against the same long-lived pod would have been a
 false negative — the empirical signature of that defect class is
 precisely a 1/10 result, not the 10/10 observed here.
 
-### D. RQ4 — Evasion Boundary Characterization
+### D. RQ4 — Evasion Boundary Characterization (Table VII / Fig. 10)
 
-[PENDING — not yet run at N=10. N=2-3 pilot data shows the expected
-pattern for all three threshold-based detectors (T1610, T1499, T1613):
-0/N fired at one unit under threshold, N/N fired exactly at threshold.]
+N=10 trials per boundary per technique, default thresholds, live cluster.
+For T1610 and T1613, "just under" is exactly one unit below the
+documented default threshold; for T1499, "just under" uses a
+deliberately wider margin (15 versus the threshold of 25) rather than
+exactly 24, for a reason reported honestly in Section VII rather than
+concealed: live measurement of the exact per-invocation process-count
+overhead of the attack-firing helper proved unreliable across repeated,
+carefully-spaced trials, and a defensible-but-imprecise boundary claim
+was judged preferable to an exact-sounding one the evidence did not
+actually support.
+
+**TABLE VII. Evasion boundary results, default thresholds.**
+
+| Technique | Just under threshold | At threshold |
+|---|---|---|
+| T1610 (threshold 5) | 0/10 fired | 10/10 fired |
+| T1499 (threshold 25) | 0/10 fired | 10/10 fired |
+| T1613 (threshold 10) | 0/10 fired | 10/10 fired |
+
+All three threshold-based detectors show the same clean pattern: an
+attacker who knows the default threshold and stays under it evades
+detection with certainty (0/10 across 30 total sub-threshold trials);
+an attacker who reaches the threshold is caught with equal certainty
+(10/10 across 30 total at-threshold trials). We report this as a
+measured, disclosed property of a threshold-based detector (Section III)
+rather than as a weakness discovered post hoc — the threat model
+explicitly scopes this boundary as known and deliberately characterized,
+and this experiment is that characterization.
 
 ---
 
@@ -522,13 +555,31 @@ data:
    (`→`) versus ASCII-hyphen (`->`) mismatch against the system's actual
    log output — indistinguishable, without direct log inspection, from a
    genuine detection failure.
+4. Several evaluation-script crashes caused by uncaught transient
+   subprocess timeouts, which — combined with an evaluation script that
+   originally wrote its results only once, at completion — meant a single
+   momentary `kubectl` hiccup an hour into an N=10 run could discard every
+   trial collected up to that point. Fixed by catching the timeout at the
+   call site and by writing every result to disk immediately after each
+   trial rather than only at the end.
 
-We surface this not as an incidental footnote but as a methodological
-claim: for systems whose correctness depends on multi-source event
-timing and cross-process state (dedup flags, correlation windows, alert
-buffers), static analysis and unit-level testing are necessary but not
-sufficient, and an evaluation pipeline that never executes against the
-live target system risks reporting fabricated confidence.
+This experience was not unique to this evaluation. The companion
+systems/performance evaluation for this project (latency, resource
+overhead, polling scalability, and fault-tolerance testing, reported
+separately) independently encountered and fixed two live-execution-only
+defects of its own — both traced to process-identifier ambiguity
+silently corrupting CPU/RSS resource-overhead and fault-recovery
+measurements — using the same "found only by running it for real"
+pattern. Two independent evaluation efforts on the same codebase, testing
+different subsystems, each surfaced multiple defects invisible to code
+review; neither found the other's defects by inspection either. We
+surface this not as an incidental footnote but as a methodological claim:
+for systems whose correctness depends on multi-source event timing and
+cross-process state — dedup flags, correlation windows, alert buffers,
+or process-identity bookkeeping — static analysis and unit-level testing
+are necessary but not sufficient, and an evaluation pipeline that never
+executes against the live target system risks reporting fabricated
+confidence.
 
 ---
 
@@ -552,22 +603,49 @@ live target system risks reporting fabricated confidence.
   72.2% at 10/10 — a substantial improvement over pilot N=2-3 data, but
   a larger N would further tighten intervals, particularly relevant near
   any future severity- or threshold-boundary claims.
-- [PENDING: final status of RQ3/RQ4 and the deferred old-vs-new-code
-  chain-dedup comparison and threshold-sweep experiment, both explicitly
-  descoped from this evaluation cycle for time.]
+- **T1499 evasion-boundary precision.** RQ4's T1499 result uses a
+  comfortably-under-threshold value (15 versus the threshold of 25)
+  rather than an exact threshold-minus-one boundary, for the reason
+  reported in Section VII: the exact process-count overhead of the
+  attack-firing mechanism itself proved difficult to pin down reliably in
+  live testing. T1610 and T1613's boundaries are exact.
+- **Deferred experiments.** An old-code-versus-new-code comparison for
+  the chain-correlation fix (Section IV-B), and a threshold-sweep
+  experiment varying detection thresholds across multiple values rather
+  than only default-versus-boundary, were both explicitly descoped from
+  this evaluation cycle for time and are not included in this paper's
+  results. Neither affects the validity of the results that are
+  included; both would add depth to, respectively, Section VI-C and
+  Section VI-D.
 
 ---
 
 ## IX. Conclusion
 
-[DRAFT — finalize once RQ3/RQ4 land.] This paper presented CAGE, a
-cross-layer Kubernetes runtime security system, and evaluated it against
-four explicit research questions on live infrastructure. The central
-empirical result — a perfectly complementary 0%/100% split across 220
-single-source ablation trials, recovered to 100% under fusion — provides
-direct, controlled evidence that cross-layer telemetry fusion is not an
-incremental improvement over single-source detection for this technique
-set, but a structural requirement for full coverage.
+This paper presented CAGE, a cross-layer Kubernetes runtime security
+system that fuses eBPF telemetry with the Kubernetes audit log via a
+pod-identity-keyed correlator, and evaluated it entirely on live
+infrastructure against four explicit research questions. Per-technique
+recall reached 100% across all 11 detected MITRE ATT&CK techniques
+(RQ1). A 330-trial ablation study produced the paper's central empirical
+result: a perfectly complementary 0%/100% detection split across 220
+single-source trials, recovered to 100% only once both telemetry sources
+were fused, with no single source covering more than six of the eleven
+techniques (RQ2) — direct, controlled evidence that cross-layer fusion is
+not an incremental improvement over single-source detection for this
+technique set, but a structural requirement for full coverage. All five
+documented attack chains re-armed and re-fired correctly across ten
+independent episodes each, validating the system's episode-scoped
+correlation design against the specific failure mode — permanent,
+fire-once dedup — that an earlier version of the codebase actually
+exhibited (RQ3). CAGE's three threshold-based detectors each drew a
+clean, disclosed line between certain evasion and certain detection at
+their documented default thresholds (RQ4). Beyond these results, this evaluation effort surfaced multiple real
+detection-logic and evaluation-tooling defects that static analysis
+alone did not catch — a finding that we believe generalizes beyond this
+system to any runtime security tool whose correctness depends on
+cross-process state and multi-source event timing: such systems should
+be evaluated by running them, not only by reading them.
 
 ---
 

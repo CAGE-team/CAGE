@@ -16,7 +16,7 @@ E3-old-code-comparison and E7 (sweep) are explicitly descoped for time
 | E2 `audit_only` (N=10) | **DONE** | 5 audit techniques 10/10, 6 tetragon techniques 0/10 -- exact complement of tetragon_only, clean |
 | E2 `fused` (N=10) | **DONE** | 11/11 techniques all 10/10 -- clean, matches expectations |
 | E3 new-code (N=10) | **DONE** | all 5 chains 10/10 (50/50 total) -- clean, validates episode-scoped re-arm fix |
-| E9 (N=10) | **IN PROGRESS** | starting now |
+| E9 (N=10) | **DONE** | T1610/T1499/T1613 all 0/10 at just_under, 10/10 at at_threshold -- clean, pipeline complete |
 
 ## If resuming after an interruption
 
