@@ -63,8 +63,8 @@ no trace in eBPF telemetry. This gap between what happens at the kernel
 and what happens at the control plane is not a minor blind spot; it
 sits directly on the path that many real intrusions take, and it exists
 in the large majority of Kubernetes deployments running today.
-Kubernetes has become the default way organizations run containerized
-workloads at scale, and that popularity carries a cost. A 2024 industry
+Kubernetes [16] has become the default way organizations run containerized
+workloads at scale, and that popularity carries a cost [15]. A 2024 industry
 survey of 600 DevOps, engineering, and security professionals found
 that 89% of organizations had experienced at least one container- or
 Kubernetes-related security incident in the previous year, with 45%
@@ -86,8 +86,8 @@ log each see roughly half of an attacker's actions inside a cluster;
 CAGE joins the two streams on the pod UID, the one identifier that is
 stable across both.*
 
-Kernel-level telemetry, gathered through eBPF, sees what a process
-actually does once it is running inside a container: a shell being
+Kernel-level telemetry, gathered through eBPF [17], sees what a
+process actually does once it is running inside a container: a shell being
 spawned, a TCP connection being opened, a dangerous syscall being
 invoked. It has no native concept of a Kubernetes API action, so a
 `kubectl exec` session or a secret read through the API server produces
@@ -652,8 +652,9 @@ co-occur within the same 120-second window for the same pod UID, not by
 traversing a persisted graph structure.
 
 This design is a deliberate trade-off. A learned, graph-based approach,
-of the kind KAIROS and UNICORN take at the operating-system level, can in
-principle generalize to attack patterns nobody enumerated in advance.
+of the kind KAIROS [12] and UNICORN [5] take at the operating-system
+level, can in principle generalize to attack patterns nobody
+enumerated in advance.
 That generality comes at a cost: a decision boundary that depends on
 training data and is not fully disclosable. CAGE's bounded-window
 approach cannot generalize beyond its explicit rule set. In exchange,
@@ -765,8 +766,8 @@ as a shell spawn or a privilege escalation attempt, a directed edge to a
 synthetic external node for a remote-exec session, or an edge between two
 real pod nodes for a lateral network connection. The browser dashboard
 renders this as an interactive canvas graph, alongside a MITRE technique
-reference panel, a kill-chain step indicator for correlated alerts, and a
-per-source health view.
+reference panel, a kill-chain [18] step indicator for correlated
+alerts, and a per-source health view.
 
 That health view is deliberately kept separate from the detection path.
 A `/api/health` endpoint reports, for each telemetry source, whether its
@@ -1930,34 +1931,89 @@ arXiv:2103.14628.
 statistical inference," *J. Amer. Statist. Assoc.*, vol. 22, no. 158,
 pp. 209–212, 1927.
 
-*(Additional references still needed before submission: general
-Kubernetes/container-security survey citations a reviewer might expect
-in §I's opening framing. [9]-[14] were added during the Related Work
-and Evaluation Methodology passes and verified by direct retrieval of
-each source's own text or abstract (full first-page text extracted for
-[4], [11], [12], and [13]; verbatim abstract for [1]-[10]; [14] is a
-standard, widely-cited statistics reference confirmed by name and
-citation details), the same standard applied to [1]-[8]; further
-citations should meet the same bar rather than being added for count
-alone.)*
+[15] O. Jarkas, R. Ko, N. Dong, and R. Mahmud, "A container security
+survey: Exploits, attacks, and defenses," *ACM Comput. Surv.*, vol.
+57, no. 7, pp. 1–36, Feb. 2025, doi: 10.1145/3715001.
+
+[16] Kubernetes, Cloud Native Computing Foundation. [Online].
+Available: https://kubernetes.io/
+
+[17] eBPF, Linux Foundation. [Online]. Available: https://ebpf.io/
+
+[18] E. M. Hutchins, M. J. Cloppert, and R. M. Amin, "Intelligence-driven
+computer network defense informed by analysis of adversary campaigns
+and intrusion kill chains," *Leading Issues Inf. Warfare Secur. Res.*,
+vol. 1, no. 1, p. 80, 2011.
+
+*(All 18 references verified by direct retrieval of each source's own
+text or abstract: full first-page text extracted for [4], [11], [12],
+and [13]; verbatim abstract for [1]-[3], [6]-[7], [9]-[10], and [15];
+[14] is a standard, widely-cited statistics reference confirmed by
+name and citation details; [16], [17], and [18] are, respectively, the
+Kubernetes and eBPF projects' own canonical sources and the original
+Kill Chain paper, cited because both technologies and that concept are
+used throughout the paper without prior citation. Every in-text
+citation has a corresponding entry here and every entry is cited at
+least once in the text.)*
 
 ---
 
 ## Appendix: Reproducibility Artifacts
 
-- Person A scripts, data, figures, tables: `evaluation/person_a/`
-  (see `evaluation/person_a/README.md` for exact run order and commands)
-- Person B scripts, data, figures, tables: `evaluation/person_b/`
-- Master full-scale re-run driver (Person B):
-  `evaluation/person_b/scripts/run_full_scale_all.sh`
-- Environment rebuild: `restart_cage.sh` (repo root)
-- Pilot-scale raw data (archived, not deleted, for comparison):
-  `evaluation/person_b/data/*_pilot_*.csv`,
-  `evaluation/person_a/output_pilot_N2-3/`
-- Evaluation-plan review and gap analysis:
-  `EVALUATION_REVIEW.md` (Person B's review, repo root) and
-  `EVALUATION_REVIEW_PERSON_A.md` (Person A's independent review, repo
-  root) — both review the same `EVALUATION_PLAN.md` from each
-  contributor's own domain and should both be consulted.
-- Full session narrative and complete bug list for Person A's evaluation:
-  `evaluation/person_a/SESSION_REPORT.md`
+**Repository organization.** Detection-quality experiments (E1, E2,
+E3, E9; §VI-A, VI-B, VI-C, VI-G), their scripts, and their raw data
+live under `evaluation/person_a/`; systems-characteristics experiments
+(E4, E5, E6, E8; §VI-D, VI-E, VI-F, VI-H) live under
+`evaluation/person_b/`. Each directory's own `README.md` gives the
+exact run order and command-line invocations used to produce the
+results in this paper. `restart_cage.sh` (repository root) rebuilds
+the evaluation environment, the `kind` cluster, Tetragon, and the
+audit-log-patched API server, from a clean state.
+
+**Datasets.** Table VIII lists the raw CSV file backing each result
+table and figure in §VI, along with its row count. Every experiment's
+trial-level data is preserved exactly as collected; no CSV is
+regenerated or overwritten between the pilot-scale and full-scale
+runs, and pilot-scale files are kept alongside the full-scale ones
+(`evaluation/person_b/data/*_pilot_*.csv`,
+`evaluation/person_a/output_pilot_N2-3/`) for direct comparison.
+
+**TABLE VIII. Raw CSV files and what they back.**
+
+| File | Rows | Backs |
+|---|---|---|
+| `results_detection_accuracy.csv` | 180 | Table IV, Fig. 5 (§VI-A) |
+| `results_ablation_full.csv` | 330 | Table V, Figs. 3-4 (§VI-B) |
+| `results_chain_dedup.csv` | 50 | Table VI-C, Fig. 8 (§VI-C) |
+| `results_latency.csv` | 40 | Table VI-D, Fig. 6 (§VI-D) |
+| `results_latency_by_connage.csv` | 5 | Fig. 7 (§VI-D) |
+| `results_overhead.csv` | 242 | Table VI-E, Fig. 9 (§VI-E) |
+| `results_scalability.csv` | 45 | Table VI-F (§VI-F) |
+| `results_parameter_sensitivity.csv` | 60 | Table VII, Fig. 10 (§VI-G) |
+| `results_fault_recovery.csv` | 15 | Table VI-H, Fig. 2 (§VI-H) |
+
+The first four rows live under `evaluation/person_a/output/`; the
+remaining five live under `evaluation/person_b/data/`.
+
+**Figure and table generation.** Each figure is produced by a
+dedicated, single-purpose script that reads the corresponding CSV
+directly, so no figure depends on manually transcribed numbers.
+Detection-quality figures (Figs. 3-5, 8, 10) are generated by the
+scripts under `evaluation/person_a/plots/`; systems-characteristics
+figures (Figs. 2, 6, 7, 9) are generated by the scripts under
+`evaluation/person_b/plotting/`, which also includes `build_tables.py`
+for that half's result tables. Fig. 1, the Introduction's conceptual
+visibility-gap diagram, is the one exception: it is not data-driven
+and is generated by `evaluation/figures/plot_fig1_visibility_gap.py`.
+All plotting scripts share a common style module
+(`evaluation/person_a/plots/style.py`) so that font, color palette,
+and figure sizing are consistent across every figure in this paper.
+
+**Reproduction.** Rebuilding the environment, running an experiment,
+and regenerating its figure or table is a three-step process
+documented in full in each half's own `README.md`: bring up the
+cluster and server with `restart_cage.sh`, run the experiment script
+with the same command-line flags used for this paper's results
+(trial counts and phase durations are explicit arguments, not
+hardcoded), and run the corresponding plotting script against the
+resulting CSV.
