@@ -64,10 +64,14 @@
   <path class="arrow" d="M250,335 H320"/>
   <path class="arrow" d="M250,485 H320"/>
 
-  <!-- Pod UID Cache -> consumers (dashed resolution queries) -->
-  <path class="arrowDashed" d="M470,92 C470,110 460,130 460,150"/>
-  <path class="arrowDashed" d="M540,92 C540,180 500,260 460,300"/>
-  <path class="arrowDashed" d="M610,92 C610,240 500,400 460,450"/>
+  <!-- Pod UID Cache -> consumers (dashed resolution queries). Orthogonal
+       routing (straight vertical, then straight horizontal), each on its
+       own lane at x=600/630, both comfortably right of every consumer
+       box's edge at x=560 -- guarantees no crossing, unlike a diagonal
+       curve whose clearance is harder to verify at a glance. -->
+  <path class="arrowDashed" d="M440,92 V150"/>
+  <path class="arrowDashed" d="M600,92 V315 H560"/>
+  <path class="arrowDashed" d="M630,92 V465 H560"/>
 
   <!-- Shared Event Queue -->
   <rect class="box" x="640" y="290" width="180" height="90"/>

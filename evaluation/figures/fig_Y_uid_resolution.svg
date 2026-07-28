@@ -42,7 +42,7 @@
   <text x="500" y="156" text-anchor="middle" class="sub">pod object (uid field)?</text>
 
   <text x="545" y="112" class="lbl" fill="#15803d">yes</text>
-  <path class="yes" d="M615,130 C700,110 780,120 800,150"/>
+  <path class="yes" d="M615,128 C700,110 760,118 800,128"/>
 
   <text x="500" y="222" text-anchor="middle" class="lbl" fill="#b91c1c">no</text>
   <path class="no" d="M500,205 V235"/>
@@ -54,7 +54,7 @@
   <text x="500" y="322" text-anchor="middle" class="sub">(exec_container_map)</text>
 
   <text x="565" y="262" class="lbl" fill="#15803d">yes</text>
-  <path class="yes" d="M635,275 C740,240 790,180 800,158"/>
+  <path class="yes" d="M635,275 C740,230 770,180 800,152"/>
 
   <text x="500" y="382" text-anchor="middle" class="lbl" fill="#b91c1c">no</text>
   <path class="no" d="M500,365 V395"/>
@@ -66,7 +66,7 @@
   <text x="500" y="482" text-anchor="middle" class="sub">15 / 12 / 8 chars?</text>
 
   <text x="575" y="422" class="lbl" fill="#15803d">yes</text>
-  <path class="yes" d="M650,435 C750,320 790,220 800,165"/>
+  <path class="yes" d="M650,435 C760,350 780,220 800,175"/>
 
   <text x="500" y="552" text-anchor="middle" class="lbl" fill="#b91c1c">no</text>
   <path class="no" d="M500,535 V565"/>
@@ -74,7 +74,7 @@
   <!-- Resolved merge box -->
   <rect class="resolved" x="800" y="120" width="180" height="60"/>
   <text x="890" y="145" text-anchor="middle" class="title">Pod UID resolved</text>
-  <text x="890" y="163" text-anchor="middle" class="sub">tag event · filter namespace · enqueue</text>
+  <text x="890" y="163" text-anchor="middle" class="sub">tag · filter · enqueue</text>
 
   <!-- Data stores feeding decisions 2 and 3 -->
   <rect class="store" x="720" y="255" width="220" height="60"/>
@@ -101,8 +101,12 @@
   <text x="500" y="710" text-anchor="middle" class="sub">Resolved before</text>
   <text x="500" y="726" text-anchor="middle" class="sub">2s elapses?</text>
 
-  <text x="700" y="705" class="lbl" fill="#15803d">yes</text>
-  <path class="yes" d="M660,715 C980,715 980,150 800,150"/>
+  <!-- Orthogonal routing, terminating at the box's RIGHT edge (x=980).
+       An earlier version ended at x=800 (the box's LEFT edge), which
+       meant the horizontal final segment cut straight across the box's
+       full width at y=150, directly through both lines of its text. -->
+  <text x="880" y="705" class="lbl" fill="#15803d">yes</text>
+  <path class="yes" d="M660,715 H980 V152"/>
 
   <text x="500" y="795" text-anchor="middle" class="lbl" fill="#b91c1c">no</text>
   <path class="no" d="M500,770 V800"/>
