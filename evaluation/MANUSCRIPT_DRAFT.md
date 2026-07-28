@@ -7,7 +7,7 @@ audit log, just as the `kubectl exec` command that spawned it is
 invisible to eBPF telemetry. Most Kubernetes runtime security tools
 instrument only one of these layers, so an attacker whose intrusion
 crosses both is only ever half observed, and the two halves are never
-linked. This paper presents CAGE (Cross-layer Attack Graph Engine),
+linked. This paper presents CAGE (Cross-Layer Attack Graph Engine),
 which fuses eBPF telemetry from Tetragon with the Kubernetes audit log
 using the pod UID, a value fixed for a pod's lifetime, as the
 correlation key across both sources. CAGE detects 11 MITRE ATT&CK
@@ -472,12 +472,12 @@ browser dashboard.*
 Two consequences follow from this structure. First, the hardest problem
 in the system is not any individual detection rule. It is establishing
 pod identity reliably enough, and fast enough, for two telemetry domains
-that learn about that identity at different speeds; Section IV-C
+that learn about that identity at different speeds; §IV-C
 describes that mechanism directly, since it is where most of the
 engineering effort in this codebase actually went. Second, once identity
 resolution and event normalization are handled, the detection logic
 itself is deliberately simple: bounded state, explicit thresholds, and no
-learned model standing between an event and an alert. Section IV-E
+learned model standing between an event and an alert. §IV-E
 explains that simplicity as a deliberate trade-off in its own right.
 
 ### B. Telemetry Acquisition
@@ -513,7 +513,7 @@ would let a denied request masquerade as a successful one.
 A third source, the network monitor, addresses a limitation of relying
 on the `tcp_connect` kprobe alone for lateral-movement detection: kprobe
 coverage depends on a BTF-enabled kernel, a constraint documented in
-Section VIII that does not hold across every deployment environment. The
+§VIII that does not hold across every deployment environment. The
 network monitor is an independent, poll-based fallback that periodically
 executes `cat /proc/net/tcp` inside every monitored pod through `kubectl
 exec` and parses established connections directly from procfs. It does
@@ -529,7 +529,7 @@ detection threshold. This behavior surfaced during development rather
 than being anticipated up front. The fix polls all monitored pods
 concurrently through a thread pool sized to the pod count, bounding
 sweep time by the slowest single `kubectl exec` call rather than their
-sum. Section VI-F reports on the scalability of this design directly.
+sum. §VI-F reports on the scalability of this design directly.
 
 ### C. Pod UID Identity Resolution
 
@@ -540,7 +540,7 @@ pod UID as structured fields under the request's `user.extra` metadata.
 The API server places these fields there itself; CAGE does not have to
 infer them. Resolving a pod UID from an eBPF event is not direct at all,
 and this is the part of the system where the identity race described in
-Section IV-A actually has to be handled.
+§IV-A actually has to be handled.
 
 The pod UID cache is populated by a long-running Kubernetes watch over
 all pods across all namespaces. It is thread-safe and indexed three
@@ -549,7 +549,7 @@ account)`. The watch reconnects with exponential backoff on failure.
 Once failures cross a small consecutive-failure threshold, the cache
 exposes a `degraded` flag, letting a caller distinguish "no recent
 activity" from "identity resolution is not currently trustworthy." This
-flag is informational. It does not gate detection; Section IV-G
+flag is informational. It does not gate detection; §IV-G
 discusses that separation of concerns further.
 
 Tetragon events do not always carry a usable pod reference directly.
@@ -624,7 +624,7 @@ the name imply more than the implementation does. `CausalGraph`
 maintains a `networkx` directed graph whose nodes are pod identities,
 added as events arrive. It does not currently populate edges on that
 graph; the graph the dashboard renders is synthesized independently, as
-described in Section IV-G. The mechanism that actually decides whether a
+described in §IV-G. The mechanism that actually decides whether a
 technique or a multi-hop chain has fired is a bounded, per-pod-UID
 sliding window of recent normalized events, held for 120 seconds and
 pruned against each new event's own timestamp. Individual technique
@@ -649,9 +649,9 @@ training data and is not fully disclosable. CAGE's bounded-window
 approach cannot generalize beyond its explicit rule set. In exchange,
 every alert it produces traces to one named rule and one disclosed
 threshold, exactly the property the evasion-boundary evaluation in
-Section VI-G measures directly. That same simplicity is why the system's
+§VI-G measures directly. That same simplicity is why the system's
 resource cost stays flat under load, rather than scaling with the
-complexity of a model's inference cost, as reported in Section VI-E.
+complexity of a model's inference cost, as reported in §VI-E.
 
 A pod UID is a long-lived identifier that can be reused across many
 separate, unrelated incidents over a pod's lifetime; nothing in
@@ -670,7 +670,7 @@ it, so a pod that triggered it once could never trigger it again for the
 rest of its lifetime. This defect was found and fixed during this
 project's own evaluation effort. The fix was verified live, by firing
 two independent bursts against the same long-lived pod and confirming
-both were reported. Section VII discusses this and several related
+both were reported. §VII discusses this and several related
 defects found the same way, by running the system rather than only
 reading it.
 
@@ -734,7 +734,7 @@ namespaces from this specific rule would also exclude a real attacker's
 remote-exec session into a compromised infrastructure pod, exactly the
 access this rule is meant to catch. Every other behavioral rule excludes
 cluster-infrastructure namespaces explicitly, by namespace rather than by
-pod name, for the same evasion-resistance reason given in Section IV-A.
+pod name, for the same evasion-resistance reason given in §IV-A.
 
 ### G. Alert Generation and Dashboard Integration
 
@@ -769,16 +769,16 @@ last produced an event. A source is flagged as stale once that silence
 passes a fixed threshold. None of this bookkeeping influences whether an
 event is processed or an alert fires. Its only purpose is to make
 degraded telemetry health observable rather than silently masked, a
-property the fault-injection evaluation in Section VI-H exercises
+property the fault-injection evaluation in §VI-H exercises
 directly. The same separation applies to the UID cache's own `degraded`
-flag from Section IV-C, which reports on resolution health without ever
+flag from §IV-C, which reports on resolution health without ever
 gating whether an already-resolved event is processed.
 
 Finally, CAGE supports running with any one telemetry source disabled
 (`tetragon_only`, `audit_only`, or the default `fused` configuration
 with all sources active), controlled by a single environment variable
 read at startup. This configurability exists for one reason: it lets the
-ablation study in Section VI-B measure, directly rather than by argument,
+ablation study in §VI-B measure, directly rather than by argument,
 what each telemetry source individually contributes and what fusing them
 recovers.
 
@@ -1181,7 +1181,7 @@ matched a backlogged detection instead of one the trial itself caused.
 This is offered as the most likely explanation supported by the log
 evidence, not as a confirmed mechanism, and neither the original
 age-dependence hypothesis nor its pilot-scale revision is treated as
-settled by this result. Section VIII returns to this as a specific,
+settled by this result. §VIII returns to this as a specific,
 named limitation rather than a footnote.
 
 A separate, earlier engineering attempt to reduce this latency by
@@ -1225,7 +1225,7 @@ full timeline directly.
 
 CPU usage stays within 3.1 to 3.2 percent across all three phases. There
 is no visible spike when the active phase begins, which is consistent
-with the architecture described in Section IV: each event does a fixed,
+with the architecture described in §IV: each event does a fixed,
 small amount of work, a handful of independent rule checks against a
 bounded per-identity window, so added event volume does not translate
 into a correspondingly larger per-event cost. Memory tells a similar
@@ -1244,7 +1244,7 @@ This measurement is scoped deliberately to the CAGE server process
 itself. It does not capture Tetragon's own per-node agent cost, since
 this `kind`-based cluster has no metrics-server installed and its
 tooling cannot isolate that cost separately; that scope limitation is
-carried into Section VIII rather than implied silently. What this
+carried into §VIII rather than implied silently. What this
 result does support is narrower and still useful: CAGE's own
 correlation layer, the part of the system this paper's architecture
 contribution is actually about, adds a small, flat cost that does not
@@ -1370,7 +1370,6 @@ than only at the default and its immediate boundary, is the
 threshold-sweep experiment descoped for time in this evaluation cycle
 (§VIII) and remains open work.
 
-
 ### H. RQ8: Fault Injection and Recovery (E8)
 
 CAGE's threat model treats its own process as trusted but treats the
@@ -1451,7 +1450,7 @@ why functional recovery, firing a real attack and confirming it is
 detected, is the primary claim of this experiment rather than the health
 flag's own state: a flag that updates only on new traffic cannot, by
 construction, prove recovery before something generates that traffic.
-It also validates a specific design choice from Section IV, that health
+It also validates a specific design choice from §IV, that health
 observability is kept separate from the detection path itself; had the
 two been coupled, this experiment would have had no independent way to
 distinguish an infrastructure problem from a detection problem.
@@ -1976,20 +1975,22 @@ runs, and pilot-scale files are kept alongside the full-scale ones
 
 **TABLE VIII. Raw CSV files and what they back.**
 
-| File | Rows | Backs |
-|---|---|---|
-| `results_detection_accuracy.csv` | 180 | Table IV, Fig. 5 (§VI-A) |
-| `results_ablation_full.csv` | 330 | Table V, Figs. 6-7 (§VI-B) |
-| `results_chain_dedup.csv` | 50 | Table VI-C, Fig. 8 (§VI-C) |
-| `results_latency.csv` | 40 | Table VI-D, Fig. 9 (§VI-D) |
-| `results_latency_by_connage.csv` | 5 | Fig. 10 (§VI-D) |
-| `results_overhead.csv` | 242 | Table VI-E, Fig. 11 (§VI-E) |
-| `results_scalability.csv` | 45 | Table VI-F (§VI-F) |
-| `results_parameter_sensitivity.csv` | 60 | Table VII, Fig. 12 (§VI-G) |
-| `results_fault_recovery.csv` | 15 | Table VI-H, Fig. 13 (§VI-H) |
+| File | Rows | Backs | Directory |
+|---|---|---|---|
+| `results_detection_accuracy.csv` | 180 | Table IV, Fig. 5 (§VI-A) | `person_a/output/` |
+| `results_ablation_full.csv` | 330 | Table V, Figs. 6-7 (§VI-B) | `person_a/output/` |
+| `results_chain_dedup.csv` | 50 | Table VI-C, Fig. 8 (§VI-C) | `person_a/output/` |
+| `results_latency.csv` | 40 | Table VI-D, Fig. 9 (§VI-D) | `person_b/data/` |
+| `results_latency_by_connage.csv` | 5 | Fig. 10 (§VI-D) | `person_b/data/` |
+| `results_overhead.csv` | 242 | Table VI-E, Fig. 11 (§VI-E) | `person_b/data/` |
+| `results_scalability.csv` | 45 | Table VI-F (§VI-F) | `person_b/data/` |
+| `results_parameter_sensitivity.csv` | 60 | Table VII, Fig. 12 (§VI-G) | `person_a/output/` |
+| `results_fault_recovery.csv` | 15 | Table VI-H, Fig. 13 (§VI-H) | `person_b/data/` |
 
-The first four rows live under `evaluation/person_a/output/`; the
-remaining five live under `evaluation/person_b/data/`.
+Directory paths are relative to `evaluation/`. Detection-quality files
+(owned by the experiments in §VI-A, VI-B, VI-C, and VI-G) live under
+`person_a/output/`; systems-characteristics files (§VI-D, VI-E, VI-F,
+and VI-H) live under `person_b/data/`.
 
 **Figure and table generation.** Each figure is produced by a
 dedicated, single-purpose script that reads the corresponding CSV
