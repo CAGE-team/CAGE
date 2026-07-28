@@ -893,7 +893,7 @@ inventory is given in the Appendix.
 
 ## VI. Results
 
-### A. RQ1 — Per-Technique Detection Accuracy (E1)
+### A. RQ1: Per-Technique Detection Accuracy (E1)
 
 N=10 attack trials and, where a meaningful control exists, N=10 matched
 benign trials, live cluster, fused configuration (180 total trials: 7
@@ -910,10 +910,10 @@ techniques with both attack and benign trials, 4 attack-only).
 | T1611 | 10 | 10 | 0 | 50.0% | 100% [72.2%, 100%] | 66.7% | Tetragon |
 | T1548 | 10 | 10 | 0 | 50.0% | 100% [72.2%, 100%] | 66.7% | Tetragon |
 | T1499 | 10 | 0 | 0 | 100% | 100% [72.2%, 100%] | 100% | Tetragon |
-| T1496† | 10 | 0 | 0 | — | 100% [72.2%, 100%] | — | Tetragon |
-| T1613† | 10 | 0 | 0 | — | 100% [72.2%, 100%] | — | Audit |
-| T1548-PRIV-POD† | 10 | 0 | 0 | — | 100% [72.2%, 100%] | — | Audit |
-| T1548.005† | 10 | 0 | 0 | — | 100% [72.2%, 100%] | — | Audit |
+| T1496† | 10 | 0 | 0 | N/A | 100% [72.2%, 100%] | N/A | Tetragon |
+| T1613† | 10 | 0 | 0 | N/A | 100% [72.2%, 100%] | N/A | Audit |
+| T1548-PRIV-POD† | 10 | 0 | 0 | N/A | 100% [72.2%, 100%] | N/A | Audit |
+| T1548.005† | 10 | 0 | 0 | N/A | 100% [72.2%, 100%] | N/A | Audit |
 
 † No meaningful benign control exists (§V); precision not computed for
 these four rows.
@@ -921,24 +921,76 @@ these four rows.
 Fig. 5 visualizes Table IV as a per-technique precision/recall/F1
 heatmap, with each technique's recall confidence interval annotated
 directly on the cell and an asterisk marking the four techniques with no
-benign control. Recall is 100% across all 11 techniques with a 95%
-confidence floor of 72.2% at this sample size — every attack trial was
-detected, in every trial, with no exceptions. Precision divides the
-technique set exactly
-along the design boundary stated in §IV: the four techniques with no
-scope exclusion (T1059, T1021, T1548, T1611) show precisely 50%
-precision because they correctly fire on the matched benign action as
-well as the attack action; the three techniques with genuine behavioral
-discrimination in this table (T1552, T1610, T1499) show 100% precision.
+benign control. Recall is 100% across all 11 techniques, with a 95%
+confidence floor of 72.2% at this sample size; every attack trial was
+detected, in every trial, with no exceptions.
 
-Detection latency for these trials falls into two clusters, consistent
-with the dedicated latency evaluation in §VI-D: audit-log-sourced
-detections and the Tetragon capability-check (T1611) resolve in 0-4
-seconds; several Tetragon-sourced detections (T1059, T1548, T1499,
-T1496, T1610) resolve in 26-30 seconds, matching the ~28s plateau
-characterized independently and at larger scale in §VI-D.
+Precision divides the technique set exactly along the design boundary
+stated in §IV, and the exactness of that split is itself informative.
+The four techniques with no scope exclusion (T1059, T1021, T1548,
+T1611) show precisely 50% precision, because each one fires on the
+matched benign action for exactly the same reason it fires on the
+attack: a shell spawned by an operator's legitimate debugging session
+looks identical, at the eBPF layer, to a shell spawned by an attacker;
+a capability check triggered by a routine container operation looks
+identical to one triggered during privilege escalation or an escape
+attempt. A partial or uneven split here would have suggested the
+benign control was not a genuine closest lookalike; an exact 50/50
+result confirms the control was constructed correctly rather than
+exposing an unexpected weakness. The three techniques with real
+behavioral discrimination in this table (T1552, T1610, T1499) show
+100% precision, because their detection logic tests for something a
+legitimate action of the same general kind does not produce: a secret
+read through a compromised service account token rather than the
+normal API path, a burst of connections to several distinct
+destinations rather than one, a burst of process executions well above
+what routine container activity generates.
 
-### B. RQ2 — Cross-Layer Necessity: Telemetry-Source Ablation (E2)
+This split is a deliberate, disclosed design choice rather than an
+incidental result. CAGE favors recall over precision for the four
+techniques where no reliable discriminator exists, on the reasoning
+that a missed detection in this threat model, an attacker who already
+has code execution inside a pod, is more costly than an alert an
+operator has to triage and dismiss. The practical consequence for a
+production deployment is that these four rules will generate a false
+positive on every legitimate action of the same shape they are built
+to catch, at whatever rate that legitimate activity occurs; §III
+already commits to this trade-off explicitly for T1021, and Table IV
+confirms empirically that the same trade-off holds, in exactly the
+same form, for T1059, T1548, and T1611.
+
+Detection latency for these trials falls into three clusters rather
+than a single split by source. Audit-log-sourced detections and the
+Tetragon capability check (T1611) resolve fastest, in 0-4.6 seconds;
+T1610 resolves in a distinct middle range, 23.1-23.5 seconds; and the
+remaining Tetragon-sourced techniques that detect via process
+execution (T1059, T1548, T1499, T1496) resolve in 28.5-29.9 seconds,
+matching the 27.96-second mean (95% CI [27.88, 28.04]) that §VI-D
+characterizes precisely using T1059 alone at larger scale (N=20); the
+wider spread observed here reflects four different techniques at N=10
+each rather than one technique at N=20. That the same plateau appears
+here, in a correctness experiment never designed to measure latency, is
+a useful cross-check: it shows the pattern reported in §VI-D is not an
+artifact of that experiment's own methodology but a property of the
+underlying telemetry pipeline that surfaces under any workload.
+
+T1611's speed relative to the other Tetragon-sourced techniques is
+worth flagging rather than treating as an unremarked exception. It
+detects through a different underlying kernel probe, a capability
+check rather than a process-execution event, so its fast resolution is
+consistent with, though not confirmed to be caused by, the
+connection-age and event-buffering behavior that §VI-D reports as an
+open question rather than a settled explanation; process-execution
+events are far more numerous on this cluster than capability-check
+events, and a lower-volume event type would be less exposed to
+whatever queuing effect produces the plateau for the busier one.
+T1610's own middle position, faster than the plateau but slower than
+an audit-log detection, is consistent with its dual telemetry path
+(§IV): both the Tetragon kprobe and the independent NetworkMonitor
+poll feed the same burst-tracking window, and the alert reflects
+whichever source's event completes the threshold first.
+
+### B. RQ2: Cross-Layer Necessity: Telemetry-Source Ablation (E2)
 
 N=10 trials per technique per condition, 3 conditions
 (`tetragon_only`, `audit_only`, `fused`), 330 total trials.
@@ -966,16 +1018,44 @@ The split is perfectly complementary with zero exceptions across 220
 single-source trials: every technique is detected with 0% probability
 under exactly one single-source condition and 100% under the other, and
 the fused condition recovers 100% detection across all 11 techniques.
+
+The cleanness of this split, exactly 0% or exactly 100%, never a
+partial or degraded rate in between, is not a foregone conclusion and
+is worth explaining rather than only reporting. It confirms that each
+technique's detection logic is implemented entirely on one side of the
+eBPF/audit-log boundary, with no rule that partially depends on both
+sources to fire even once; the correlation that spans both sources
+happens only at the chain level (§VI-C), never inside a single
+technique's own detection condition. Had any technique shown a partial
+detection rate under ablation, that would have indicated an
+unintended cross-source dependency inside what was assumed to be a
+single-source rule, a design defect rather than the expected result.
+The absence of any such case here is itself a form of validation for
+the architecture described in §IV: what Table I claims about each
+technique's telemetry source is exactly what Table V observes when
+that source is removed.
+
 No technique requires *both* sources simultaneously, but no *single*
-source covers more than 6 of the 11 — meaning an operator running either
+source covers more than 6 of the 11, meaning an operator running either
 tool alone, regardless of tuning effort on the deployed side, carries a
 structural blind spot over roughly half the technique catalog that no
-threshold adjustment can close. Only adding the missing telemetry source
-closes it. This result directly substantiates the motivating claim in
-§I with controlled, live-cluster measurement rather than architectural
+threshold adjustment can close. This is a stronger claim than reduced
+sensitivity: the missing techniques are not detected less reliably
+under single-source operation, they are categorically undetectable,
+because the events they depend on are never produced by the missing
+telemetry domain in the first place. No amount of rule tuning on the
+remaining source can recover them; only restoring the missing source
+can. This result directly substantiates the motivating claim in §I
+with controlled, live-cluster measurement rather than architectural
 argument alone.
 
-### C. RQ3 — Chain-Correlation Reliability (E3)
+This experiment characterizes complete source removal. It does not
+test partial degradation, a telemetry source that is still running but
+delayed, dropping events, or intermittently unavailable, which is a
+materially different failure mode addressed separately in the
+fault-injection evaluation (§VI-H).
+
+### C. RQ3: Chain-Correlation Reliability (E3)
 
 N=10 trials per chain, all 5 documented chains, each trial pair
 separated by >120s (exceeding the correlation window) to force
@@ -999,15 +1079,54 @@ Fig. 8 plots cumulative detections per trial for a representative chain
 against the ideal one-per-trial diagonal, illustrating this reliability
 visually alongside the full per-chain breakdown in Table VI-C. Every
 documented chain re-fires reliably across 10 independent episodes each,
-with zero missed detections (50/50). This directly validates the
-episode-scoped re-arm design described in §IV: had the earlier,
-fire-once-forever dedup behavior (§VII, defect 1) still been present, at
-most the *first* trial of each chain would have fired and every
-subsequent trial against the same long-lived pod would have been a false
-negative — the empirical signature of that defect class is precisely a
-1/10 result, not the 10/10 observed here.
+with zero missed detections (50/50).
 
-### D. RQ5 — Detection Latency (E4)
+The methodological choice to space trials more than 120 seconds apart
+is what makes this result meaningful rather than trivial. A pod UID in
+Kubernetes is a long-lived identifier that persists for the pod's
+entire lifetime and is not retired just because it triggered an alert;
+a real workload can be compromised, remediated, and compromised again,
+and each of those incidents needs to be reported independently. Ten
+trials fired back to back within the same 120-second window would only
+demonstrate that a chain can fire once, since every subsequent trigger
+within that window would be indistinguishable from the same ongoing
+incident by the correlator's own definition. Enforcing genuine
+separation between trials is what allows 50/50 to be read as evidence
+that the re-arm mechanism works, not merely that the chain-matching
+logic works.
+
+This result also closes the loop on a defect described in §VII. The
+episode-scoped design tested here, retaining a chain's firing key only
+while its constituent legs remain continuously satisfied and
+discarding it the moment they are not, is the same general pattern
+that an earlier version of the T1499 fork-bomb detector failed to
+implement: that detector set its firing key once and never cleared it,
+so a pod that triggered it a first time could never trigger it again
+for the rest of its lifetime. The five multi-hop chains tested here
+already implemented the correct discard-on-condition-false behavior;
+what this experiment confirms is that the pattern behaves correctly
+under real system conditions and real timing, across all five
+documented chains, not only in the isolated case where its absence was
+first discovered. Had the fire-once-forever behavior been present in
+any of these five detectors instead, the expected signature would be
+unmistakable: at most the *first* trial of each chain would have
+fired, and every subsequent trial against the same long-lived pod
+would have registered as a false negative. The empirical signature of
+that defect class is precisely a 1/10 result, not the 10/10 observed
+here.
+
+Having established that CAGE detects individual techniques correctly
+(§VI-A), that fusing both telemetry sources is architecturally
+necessary rather than convenient (§VI-B), and that its multi-hop chain
+correlation holds up under realistic, repeated, independent use
+(§VI-C), the remaining question in this half of the evaluation is
+where the system's guarantees stop. §VI-D through §VI-F turn to what
+this correctness costs in latency, resource overhead, and monitoring
+scalability; RQ4 (§VI-G) returns to correctness one last time to
+characterize, deliberately and precisely, the one boundary this paper
+commits to disclosing rather than leaving implicit.
+
+### D. RQ5: Detection Latency (E4)
 
 Detection latency governs what CAGE's alerts are actually useful for.
 An alert that arrives half a minute late is still evidence, but it is no
@@ -1091,7 +1210,7 @@ throughout, and any system consuming CAGE's alerts downstream should plan
 for a comparable delay on eBPF-sourced technique classes specifically,
 even though audit-log-sourced ones arrive in a fraction of a second.
 
-### E. RQ6 — Resource Overhead (E5)
+### E. RQ6: Resource Overhead (E5)
 
 A detector meant to run continuously on every node has to justify its
 own resource cost to the operators it protects, and that cost has to
@@ -1138,7 +1257,7 @@ correlation layer, the part of the system this paper's architecture
 contribution is actually about, adds a small, flat cost that does not
 grow with attack activity.
 
-### F. RQ7 — NetworkMonitor Polling Scalability (E6)
+### F. RQ7: NetworkMonitor Polling Scalability (E6)
 
 Kubernetes clusters are elastic, and a monitoring component whose own
 timing degrades as pod count grows can create a detection gap that has
@@ -1148,12 +1267,12 @@ to a real defect this project found and fixed during its own
 development, not to a hypothetical concern.
 
 The original `NetworkMonitor` design polled monitored pods
-sequentially, one `kubectl exec` call at a time, and `EVALUATION_PLAN.md`
-accordingly expected cycle time to grow roughly linearly with pod count,
-crossing the nominal 5-second target somewhere between 5 and 10 pods.
-That expectation undersold the actual failure mode. With enough
-monitored pods, one full sequential sweep could take longer than the
-10-second window `_check_t1610` uses to detect a scan burst, which meant
+sequentially, one `kubectl exec` call at a time, and this evaluation's
+own planning accordingly expected cycle time to grow roughly linearly
+with pod count, crossing the nominal 5-second target somewhere between
+5 and 10 pods. That expectation undersold the actual failure mode. With
+enough monitored pods, one full sequential sweep could take longer than
+the 10-second window the T1610 check uses to detect a scan burst, which meant
 a genuine multi-pod scan could be split across two separate sweeps and
 never accumulate enough distinct destinations in either single window
 to cross the detection threshold. This was a false negative produced
@@ -1182,18 +1301,17 @@ Mean cycle time stays within a narrow band, 4.68 to 5.35 seconds, across
 the entire tested range, and the 95% confidence intervals at every N
 overlap heavily with one another, all falling roughly within 3.6 to 6.1
 seconds. Two of the five N values have a mean that sits just above the
-nominal
-5-second target, but given how much the confidence intervals overlap,
-this reads as noise around a flat cycle time rather than a genuine
-upward trend with pod count. That is a meaningfully different claim than
-the one the original plan anticipated. Rather than characterizing where
-a scalability limitation appears, as `EVALUATION_PLAN.md` originally
-framed this experiment, this result is direct evidence that the
+nominal 5-second target, but given how much the confidence intervals
+overlap, this reads as noise around a flat cycle time rather than a
+genuine upward trend with pod count. That is a meaningfully different
+claim than the one originally anticipated. Rather than characterizing
+where a scalability limitation appears, as this evaluation was
+originally planned to do, this result is direct evidence that the
 concurrency fix removed the growth trend the sequential design would
 have produced, holding cycle time flat across an order-of-magnitude
 range in monitored-pod count.
 
-### G. RQ4 — Evasion Boundary Characterization (E9)
+### G. RQ4: Evasion Boundary Characterization (E9)
 
 N=10 trials per boundary per technique, default thresholds, live
 cluster. This experiment answers RQ4 directly; it is a fixed-threshold
@@ -1223,15 +1341,44 @@ Fig. 10 plots this boundary as a per-technique dot plot, both boundary
 conditions shown side by side. All three threshold-based detectors show
 the same clean pattern: an attacker who knows the default threshold and
 stays under it evades detection with certainty (0/10 across 30 total
-sub-threshold trials); an attacker who reaches the threshold is caught
-with equal certainty (10/10
-across 30 total at-threshold trials). We report this as a measured,
-disclosed property of a threshold-based detector (§III) rather than as a
-weakness discovered post hoc — the threat model explicitly scopes this
-boundary as known and deliberately characterized, and this experiment is
-that characterization.
+sub-threshold trials), while an attacker who reaches the threshold is
+caught with equal certainty (10/10 across 30 total at-threshold
+trials).
 
-### H. RQ8 — Fault Injection and Recovery (E8)
+The sharpness of this transition, a deterministic 0/10 on one side and
+a deterministic 10/10 on the other, with no intermediate or
+probabilistic behavior in between, is itself a meaningful observation
+rather than an expected formality. It confirms that these three rules
+are exactly what §IV describes them as: fixed numeric comparisons
+against a disclosed threshold, not statistical or learned decision
+boundaries that would be expected to show some rate of ambiguous
+outcomes near the edge. This is the direct empirical counterpart to
+the trade-off argued architecturally in §IV, that CAGE's
+bounded-window, rule-based approach cannot generalize beyond its
+explicit rule set, but in exchange produces alerts that trace to one
+named rule and one disclosed threshold rather than a boundary that
+depends on training data. RQ4 is the measurement that makes that
+trade-off concrete instead of asserted.
+
+We report this as a measured, disclosed property of a threshold-based
+detector (§III) rather than as a weakness discovered post hoc. The
+threat model explicitly scopes this boundary as known and deliberately
+characterized, and this experiment is that characterization. The
+practical implication for deployment is narrower than it might first
+appear: this experiment establishes that the boundary is exactly where
+the documented threshold says it is, not what happens to detection and
+false-positive rates at any other threshold value. Lowering a
+threshold to catch a more cautious attacker is the only lever
+available for these three rules, and it trades directly against false
+positives on legitimate bursty behavior of the same shape, a burst of
+routine connections, executions, or RBAC reads. Characterizing that
+trade-off across the full range of possible threshold values, rather
+than only at the default and its immediate boundary, is the
+threshold-sweep experiment descoped for time in this evaluation cycle
+(§VIII) and remains open work.
+
+
+### H. RQ8: Fault Injection and Recovery (E8)
 
 CAGE's threat model treats its own process as trusted but treats the
 infrastructure it depends on, the kernel agent, the audit log, the API
