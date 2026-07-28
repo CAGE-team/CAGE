@@ -1731,48 +1731,124 @@ undisclosed.
 
 ## IX. Conclusion
 
-This paper presented CAGE, a cross-layer Kubernetes runtime security
-system that fuses eBPF telemetry with the Kubernetes audit log via a
-pod-identity-keyed correlator, and evaluated it entirely on live
-infrastructure along two axes and eight explicit research questions.
+Two telemetry domains already exist inside every Kubernetes cluster
+that runs eBPF-based monitoring alongside the API server's own audit
+log, and neither one is looking at the other. That gap is not a
+tooling oversight; it follows directly from what each domain can
+observe on its own. A shell spawned inside a container and the
+`kubectl exec` session that opened it are two halves of one action,
+visible to two different instruments, and nothing in either instrument
+knows the other half exists. CAGE's contribution is not the fact of
+combining these two sources; several existing tools have gestured at
+doing so. It is the specific mechanism that makes the combination
+trustworthy: resolving the Kubernetes pod UID reliably from an eBPF
+event stream that learns about container identity on a different
+schedule than the audit log does, and holding that identity steady
+enough that a technique detected by one source and a technique
+detected by the other can be attributed, with confidence, to the same
+running workload.
 
-On detection quality: per-technique recall reached 100% across all 11
-detected MITRE ATT&CK techniques (RQ1). A 330-trial ablation study
-produced this paper's central empirical result: a perfectly
-complementary 0%/100% detection split across 220 single-source trials,
-recovered to 100% only once both telemetry sources were fused, with no
-single source covering more than six of the eleven techniques (RQ2) —
-direct, controlled evidence that cross-layer fusion is not an
-incremental improvement over single-source detection for this technique
-set, but a structural requirement for full coverage. All five documented
-attack chains re-armed and re-fired correctly across ten independent
-episodes each, validating the system's episode-scoped correlation design
-against the specific failure mode — permanent, fire-once deduplication —
-that an earlier version of the codebase actually exhibited (RQ3). CAGE's
-three threshold-based detectors each drew a clean, disclosed line
-between certain evasion and certain detection at their documented
-default thresholds (RQ4).
+The evaluation in this paper was built to test that claim from several
+independent angles rather than assert it once. The ablation study
+showed a detection split with no partial cases at all, every technique
+detected with certainty under exactly one single-source configuration
+and with certainty under the other, which is a stronger result than
+reduced sensitivity would have been: the missing techniques under
+single-source operation are not weakly detected, they are structurally
+undetectable, and only restoring the missing telemetry domain recovers
+them. The chain-correlation experiment showed the same episode-scoped
+design holding up not once but across ten independently spaced
+incidents per chain, on the same long-lived pod identity, which is the
+condition under which a naive, fire-once deduplication scheme would
+have failed silently after its first trial. The evasion-boundary
+experiment showed that CAGE's threshold-based detectors behave exactly
+as their disclosed design says they should, a deterministic line rather
+than a probabilistic one. None of these three results depend on the
+other two, and taken together they describe one consistent design
+posture: CAGE gives up the generality a learned or graph-based
+detector could offer in exchange for behavior that is fully disclosed
+and traceable to one named rule.
 
-On systems characteristics: CAGE achieves this detection coverage at a
-flat, load-independent resource cost (~3.2% CPU, ~135MB RSS) (RQ6), with
-a monitoring subsystem whose polling cycle time holds flat across an
-order-of-magnitude range of monitored-pod counts after a concurrency fix
-that also closed a real detection-evasion path in the process (RQ7), and
-functionally self-heals from all three tested classes of injected
-infrastructure fault without manual intervention (RQ8) — at the
-disclosed cost of a highly consistent ~28-second detection-latency
-plateau on eBPF-sourced technique classes specifically, whose precise
-cause and dependence on connection age remain open, honestly-reported
-questions rather than settled findings (RQ5).
+That posture would be a weak trade if it were expensive to run. It is
+not. The same live cluster that produced the detection results also
+showed CPU and memory holding flat under active attack load rather than
+growing with event volume, a monitoring subsystem whose cycle time
+stayed within a narrow band across an order-of-magnitude range in
+monitored-pod count once a concurrency defect in its original design
+was corrected, and functional recovery from every one of fifteen
+injected infrastructure faults without an operator stepping in. A
+detector that is accurate but unpredictable under load, or resilient in
+description but untested against a real failure, would not answer the
+question this paper set out to answer. Reporting both halves against
+the same infrastructure, rather than treating accuracy and deployability
+as separate studies, is what lets this paper make a claim neither half
+could support alone.
 
-Beyond these results, this evaluation effort — conducted as two
-independent halves testing different subsystems — surfaced multiple real
-detection-logic and evaluation-tooling defects that static analysis
-alone did not catch on either side, a finding that we believe
-generalizes beyond this system to any runtime security tool whose
-correctness depends on cross-process state and multi-source event
-timing: such systems should be evaluated by running them, not only by
-reading them.
+One further finding sits outside any single research question and is
+worth stating on its own terms. Two people evaluated two different
+parts of this same codebase, one testing detection logic and one
+testing systems behavior, and each found real defects that static
+analysis had missed and that the other evaluator never encountered: a
+deduplication flag that could fire only once in a pod's lifetime, a
+metrics script that would have silently misattributed false positives,
+a health flag whose passive updates cannot prove what they appear to
+prove. None of these were adversarial; all of them were found by
+running the system and watching it behave unexpectedly. That pattern
+is not specific to CAGE. Any system whose correctness depends on
+cross-process state and the relative timing of events from more than
+one source carries the same risk, and this paper's experience argues
+that such systems need to be evaluated by executing them against live
+infrastructure, not only reasoned about from their source.
+
+This evaluation also has real limits on what it can claim. Every
+number reported here comes from a single control-plane, two-worker
+cluster running inside a virtual machine on one host; the relative
+pattern between audit-log and eBPF-sourced detection latency is the
+more robust claim to generalize from, and the absolute 28-second
+plateau specifically may not hold unchanged on bare metal or across a
+larger, multi-node deployment. Every attack used to produce the
+detection-quality results was fixed, disclosed, and run exactly as
+written; these results describe CAGE's behavior against that specific
+attack set, not its robustness against an adversary who has read this
+paper and is deliberately probing for a way around it, beyond the one
+threshold boundary this work already measures directly. The comparison
+against related systems in Table II is built from each system's own
+published description rather than a controlled measurement against the
+same attack set in the same cluster.
+
+Three directions follow from what this implementation already puts in
+place, rather than from a wish list assembled after the fact. The
+ablation infrastructure built for RQ2 already runs CAGE in a
+`tetragon_only` configuration; pointing that same configuration, unmodified,
+at a plain vanilla-Tetragon deployment with no CAGE correlation layer
+attached, against the same attack set used in this evaluation, would
+turn Table II's qualitative comparison into a direct, quantitative one
+at comparatively little additional engineering cost, since the
+infrastructure this would require already runs in this project's
+cluster. Extending the pod-UID correlation key
+across cluster boundaries is a second concrete step, and the Threat
+Model already states what it would require rather than leaving the
+extension abstract: folding a cluster identifier into the correlation
+key and watching more than one API server concurrently, neither of
+which the current design attempts. Third, the Tetragon-sourced latency
+plateau is characterized in this paper with considerable precision but
+without a confirmed mechanism; tracing it to a specific stage inside
+Tetragon's own event-delivery path, rather than inferring it indirectly
+through server-side timing as this evaluation did, is a well-scoped
+systems investigation that the current results motivate directly.
+
+Reduced to its essential claim, this paper shows that fusing kernel-level
+and control-plane telemetry in Kubernetes is not primarily a matter of
+running two collectors side by side. It depends on resolving one
+identity reliably across two sources that disagree about how quickly
+that identity becomes known, and once that problem is solved
+correctly, the detection gap that motivated this work closes
+structurally rather than incrementally, at a cost this paper measured
+rather than assumed. That identity-resolution problem is not unique to
+the two sources examined here, and the architecture built to solve it
+in this paper is offered as a pattern other cross-layer runtime
+security systems can reuse, not only as a description of what CAGE
+itself does.
 
 ---
 
