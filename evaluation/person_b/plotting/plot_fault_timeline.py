@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "..", "data", "results_fault_recovery.csv")
-OUT = os.path.join(HERE, "..", "figures", "fig2_fault_recovery_timeline.png")
+OUT = os.path.join(HERE, "..", "figures", "fig13_fault_recovery_timeline.png")
 
 LABELS = {
     "tetragon-consumer-kill": "Tetragon consumer\nsubprocess killed",

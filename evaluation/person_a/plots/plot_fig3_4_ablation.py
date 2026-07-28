@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Fig. 3 (ablation heatmap) + Fig. 4 (MITRE tactic coverage radar), both from
+Fig. 6 (ablation heatmap) + Fig. 7 (MITRE tactic coverage radar), both from
 results_ablation_full.csv (E2). Two figures because they answer different
-questions from the same data -- Fig. 3 is the precise per-technique
-numbers, Fig. 4 is the coverage *shape* across MITRE tactics. See
+questions from the same data -- Fig. 6 is the precise per-technique
+numbers, Fig. 7 is the coverage *shape* across MITRE tactics. See
 EVALUATION_PLAN.md E2 and EVALUATION_REVIEW.md for why both are kept.
 
 Usage:
@@ -74,7 +74,7 @@ def plot_heatmap(counts, output_dir):
     cbar.set_label("Detection rate (%)")
     ax.set_title("Detection Rate by Telemetry Source and Technique")
     fig.tight_layout()
-    return save_figure(fig, output_dir, "fig3_ablation_heatmap")
+    return save_figure(fig, output_dir, "fig6_ablation_heatmap")
 
 
 def plot_radar(counts, output_dir):
@@ -106,7 +106,7 @@ def plot_radar(counts, output_dir):
     ax.set_title("MITRE ATT&CK Tactic Coverage by Telemetry Configuration", pad=20)
     ax.legend(loc="upper right", bbox_to_anchor=(1.35, 1.1))
     fig.tight_layout()
-    return save_figure(fig, output_dir, "fig4_mitre_tactic_radar")
+    return save_figure(fig, output_dir, "fig7_mitre_tactic_radar")
 
 
 def main():
@@ -117,9 +117,9 @@ def main():
 
     counts = load_rates(args.csv_path)
     pdf1, png1 = plot_heatmap(counts, args.output_dir)
-    print(f"Fig. 3 (ablation heatmap) -> {pdf1}")
+    print(f"Fig. 6 (ablation heatmap) -> {pdf1}")
     pdf2, png2 = plot_radar(counts, args.output_dir)
-    print(f"Fig. 4 (MITRE tactic radar) -> {pdf2}")
+    print(f"Fig. 7 (MITRE tactic radar) -> {pdf2}")
 
 
 if __name__ == "__main__":

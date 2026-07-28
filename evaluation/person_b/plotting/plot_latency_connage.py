@@ -11,7 +11,7 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "..", "data", "results_latency_by_connage.csv")
-OUT = os.path.join(HERE, "..", "figures", "fig7_latency_vs_connage.png")
+OUT = os.path.join(HERE, "..", "figures", "fig10_latency_vs_connage.png")
 
 
 def load():

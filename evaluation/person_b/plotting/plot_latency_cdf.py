@@ -11,7 +11,7 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "..", "data", "results_latency.csv")
-OUT = os.path.join(HERE, "..", "figures", "fig6_latency_cdf.png")
+OUT = os.path.join(HERE, "..", "figures", "fig9_latency_cdf.png")
 
 SOURCE_MAP = {"T1059": "Tetragon (T1059)", "T1552": "Audit log (T1552)"}
 

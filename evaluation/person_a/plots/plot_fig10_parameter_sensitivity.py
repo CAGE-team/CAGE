@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fig. 10 -- two-panel: (a) precision-recall style curve across the T1610
+Fig. 12 -- two-panel: (a) precision-recall style curve across the T1610
 burst-threshold sweep, (b) evasion-boundary outcomes (just-under vs.
 at-threshold) for T1610/T1499/T1613 at their DEFAULT thresholds, from
 results_parameter_sensitivity.csv (E7 + E9 merged -- see
@@ -134,8 +134,8 @@ def main():
         fig.suptitle("T1610 Threshold Sweep", fontsize=9, y=1.02)
 
     fig.tight_layout()
-    pdf, png = save_figure(fig, args.output_dir, "fig10_parameter_sensitivity")
-    print(f"Fig. 10 -> {pdf}")
+    pdf, png = save_figure(fig, args.output_dir, "fig12_parameter_sensitivity")
+    print(f"Fig. 12 -> {pdf}")
 
 
 if __name__ == "__main__":

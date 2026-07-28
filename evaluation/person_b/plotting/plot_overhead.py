@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "..", "data", "results_overhead.csv")
-OUT = os.path.join(HERE, "..", "figures", "fig9_resource_overhead.png")
+OUT = os.path.join(HERE, "..", "figures", "fig11_resource_overhead.png")
 
 PHASE_COLOR = {"idle_pre": "#888888", "active": "#d62728", "idle_post": "#1f77b4", "baseline_cage_off": "#2ca02c"}
 

@@ -1,21 +1,5 @@
 # CAGE: A Cross-Layer Attack Graph Engine for Real-Time Kubernetes Runtime Security
 
-**Status of this draft:** Consolidated manuscript merging Person A's
-detection-quality evaluation (E1 per-technique accuracy, E2 telemetry
-ablation, E3 chain-correlation reliability, E9 evasion-boundary
-characterization, all live-cluster, N=10) with Person B's
-systems-characteristics evaluation (E4 latency, E5 resource overhead, E6
-polling scalability, E8 fault tolerance, all live-cluster, full scale).
-Both evaluations are now complete; nothing below is a placeholder.
-Line-level copyediting for a single consistent voice throughout is the
-main remaining polish pass before submission. The Abstract, Introduction,
-and Related Work have already had a dedicated critical-review pass
-(citation verification, word-count discipline, no em dashes); Sections
-III-IX are complete in content but not yet harmonized line-by-line
-between the two contributors' original drafting styles.
-
----
-
 ## Abstract
 
 A shell spawned inside a Kubernetes pod is invisible to the Kubernetes
@@ -255,9 +239,11 @@ cloud and containerized environments. A recent systematization of the
 research literature found ATT&CK used across cyber threat intelligence,
 intrusion detection, red-team exercises, and risk assessment, spanning
 enterprise networks, industrial control systems, and mobile platforms
-[10]. CAGE maps each of its eleven detected behaviors to a specific
-ATT&CK technique identifier rather than an informal, project-specific
-label, so its coverage claims can be compared directly against the
+[10]. CAGE maps each of its eleven detected behaviors to a base ATT&CK
+technique identifier, in one case (T1548-PRIV-POD) extended with a
+project-defined suffix naming a specific privileged-pod-creation
+variant rather than a published sub-technique, so its coverage claims
+can be compared directly against the
 ATT&CK-mapped systems discussed below.
 
 ### A. Kernel-Level Runtime Security via eBPF
@@ -341,7 +327,7 @@ graphs from network-layer alerts alone.
 
 ### E. Positioning of CAGE
 
-Table II summarizes this comparison along five axes: telemetry
+Table I summarizes this comparison along five axes: telemetry
 sources, multi-hop chain detection, Kubernetes pod-identity
 correlation, live attack-graph visualization, and false-positive
 mitigation strategy. Falco and vanilla Tetragon are included alongside
@@ -350,7 +336,7 @@ comparable deployed tools: Falco as the dominant open-source
 Kubernetes runtime-security tool, and vanilla Tetragon as the
 single-source baseline CAGE itself is built on and extends.
 
-**TABLE II. Related-Work Feature Comparison.**
+**TABLE I. Related-Work Feature Comparison.**
 
 | System | Telemetry Sources | Multi-Hop Chain Detection | Kubernetes Pod-Identity Correlation | Live Attack-Graph Dashboard | False-Positive Mitigation |
 |---|---|---|---|---|---|
@@ -377,12 +363,6 @@ evaluation cycle's time budget; we present it here as a concrete,
 low-effort next step rather than as a substitute already covered by the
 qualitative comparison above.
 
-*(Table numbering note: this table is provisionally labeled Table II
-to match its position in reading order; Table I currently appears
-later, in Section IV. A final table- and figure-numbering pass across
-the full manuscript, consistent with the Fig. 1 renumbering already
-flagged in Section VIII, is needed before submission.)*
-
 ---
 
 ## III. Threat Model
@@ -393,7 +373,7 @@ compromise, or a misconfigured or leaked credential, and who then
 attempts to escalate: spawning shells, moving laterally to other pods,
 reading Kubernetes secrets, escalating privileges inside or outside the
 container, abusing RBAC, or degrading node resources. This matches the
-11 techniques in Table I.
+11 techniques in Table II.
 
 **Trust assumptions.** The Linux kernel and eBPF subsystem are trusted;
 an attacker capable of loading rogue eBPF programs or otherwise blinding
@@ -479,10 +459,15 @@ correlator loop drains the shared queue and evaluates each event against
 a bounded per-identity temporal window to decide whether a technique or
 a multi-hop chain has fired. It then forwards both raw events and any
 resulting alerts to a Flask server, which exposes a REST API and two
-Server-Sent Events streams to a browser dashboard (Fig. X). *[Fig. X,
-overall CAGE architecture; source and rendered versions at
-evaluation/figures/fig_X_architecture.svg / .pdf. Final figure number to
-be assigned during manuscript assembly.]*
+Server-Sent Events streams to a browser dashboard (Fig. 2).
+
+*Fig. 2. Overall CAGE architecture. The Tetragon consumer, audit-log
+consumer, and network monitor each resolve pod identity against the
+shared pod UID cache and tag every event before placing it on one
+shared queue. A single correlator loop drains that queue, checks each
+event against the causal graph's per-pod-UID window, and broadcasts
+both raw events and resulting alerts through the Flask server to the
+browser dashboard.*
 
 Two consequences follow from this structure. First, the hardest problem
 in the system is not any individual detection rule. It is establishing
@@ -592,10 +577,14 @@ references a container is placed in a small retry buffer and
 re-attempted every 300 milliseconds, for up to two seconds. Anything
 still unresolved after that window is dropped and logged explicitly; an
 event genuinely un-attributable to any live pod after two seconds is
-unlikely to become attributable later (Fig. Y). *[Fig. Y, pod UID
-resolution workflow; source and rendered versions at
-evaluation/figures/fig_Y_uid_resolution.svg / .pdf. Final figure number
-to be assigned during manuscript assembly.]*
+unlikely to become attributable later (Fig. 3).
+
+*Fig. 3. Pod UID resolution workflow for an incoming eBPF event. A
+direct pod object resolves immediately; otherwise the consumer checks
+its container-ID map learned from `runc` invocations, then the map
+rebuilt every three seconds from the Kubernetes API, before falling
+back to the retry buffer, which re-attempts all three checks every 300
+milliseconds for up to two seconds before dropping the event.*
 
 Every event tagging function additionally discards events whose resolved
 namespace falls in a small set of cluster-infrastructure namespaces,
@@ -644,7 +633,7 @@ conditions. Examples include a shell binary observed inside a pod, a
 burst of connections to five or more distinct destination pods within
 ten seconds, twenty-five or more process executions from one pod within
 ten seconds, and ten or more reads of RBAC objects by one identity
-within thirty seconds; the remaining techniques in Table I follow the
+within thirty seconds; the remaining techniques in Table II follow the
 same pattern. Chain detection reuses the same window rather than running
 a separate pass. A chain such as remote-exec-then-shell-then-secret-access
 is checked by testing whether the relevant event types or binaries
@@ -697,15 +686,18 @@ purely for garbage collection.
 
 Every normalized event, regardless of source, passes through the same
 sequence: a fixed set of technique-specific checks, each independent of
-the others, followed by the chain checks described above. Table I lists
-the eleven MITRE ATT&CK techniques CAGE currently maps to a rule, the
-severity assigned to each, and the telemetry source that produces it.
-*[Fig. Z, proposed event processing / detection pipeline diagram, not yet
-produced. Content: one normalized event entering a fan-out of independent
-technique checks, then the shared temporal window feeding the five chain
-checks, with alerts and graph-node updates as the two outputs.]*
+the others, followed by the chain checks described above (Fig. 4).
+Table II lists the eleven MITRE ATT&CK techniques CAGE currently maps
+to a rule, the severity assigned to each, and the telemetry source
+that produces it.
 
-**TABLE I. Detected MITRE ATT&CK techniques and telemetry source.**
+*Fig. 4. The detection pipeline every normalized event passes
+through. Technique checks run independently of one another; in
+parallel, the shared per-pod-UID window feeds the five documented
+chain checks. Both paths produce an output that updates the causal
+graph and the live dashboard.*
+
+**TABLE II. Detected MITRE ATT&CK techniques and telemetry source.**
 
 | Technique | Behavior | Severity | Source |
 |---|---|---|---|
@@ -1012,7 +1004,7 @@ N=10 trials per technique per condition, 3 conditions
 | T1548-PRIV-POD | 0/10 (0%) | 10/10 (100%) | 10/10 (100%) |
 | T1548.005 | 0/10 (0%) | 10/10 (100%) | 10/10 (100%) |
 
-Fig. 3 renders Table V as a heatmap and Fig. 4 as a per-tactic radar
+Fig. 6 renders Table V as a heatmap and Fig. 7 as a per-tactic radar
 chart, both making the complementary-coverage pattern visually immediate.
 This is the paper's central empirical argument for cross-layer fusion.
 The split is perfectly complementary with zero exceptions across 220
@@ -1032,7 +1024,7 @@ detection rate under ablation, that would have indicated an
 unintended cross-source dependency inside what was assumed to be a
 single-source rule, a design defect rather than the expected result.
 The absence of any such case here is itself a form of validation for
-the architecture described in §IV: what Table I claims about each
+the architecture described in §IV: what Table II claims about each
 technique's telemetry source is exactly what Table V observes when
 that source is removed.
 
@@ -1139,7 +1131,7 @@ to behave alike. RQ5 measures this directly rather than assuming it.
 
 The distribution measurement ran the full plan-specified scale, N=20
 trials per technique on the live cluster. Table VI-D reports the summary
-statistics and Fig. 6 plots both techniques' empirical latency
+statistics and Fig. 9 plots both techniques' empirical latency
 distributions as CDFs, which makes the split between sources visible at
 a glance rather than requiring the reader to compare two rows of a
 table.
@@ -1175,7 +1167,7 @@ age dependence and revised an earlier, less controlled observation that
 had suggested younger connections detect faster. A full-scale sweep,
 run immediately after the N=20 distribution test, found the opposite
 pattern: short, non-monotonic latencies from 0.17 to 14.2 seconds with
-no visible trend across the same age range (Fig. 7). These two results
+no visible trend across the same age range (Fig. 10). These two results
 cannot both describe a stable underlying property of connection age, so
 one or both must reflect something else. Inspecting the raw server log
 for the full-scale run points to a likely explanation: a burst of 13
@@ -1220,7 +1212,7 @@ on the CAGE server process itself across an idle, an active, and a
 second idle phase, at the full plan-specified duration: 300 seconds
 idle, 600 seconds under a repeating T1059 and T1552 attack load fired
 every 3 seconds, and 300 seconds idle again, 241 total samples. Table
-VI-E reports the phase summary and Fig. 9 plots CPU and RSS across the
+VI-E reports the phase summary and Fig. 11 plots CPU and RSS across the
 full timeline directly.
 
 **TABLE VI-E. Resource overhead by phase (CAGE server process).**
@@ -1338,7 +1330,7 @@ support (§VII).
 | T1499 (threshold 25) | 0/10 fired | 10/10 fired |
 | T1613 (threshold 10) | 0/10 fired | 10/10 fired |
 
-Fig. 10 plots this boundary as a per-technique dot plot, both boundary
+Fig. 12 plots this boundary as a per-technique dot plot, both boundary
 conditions shown side by side. All three threshold-based detectors show
 the same clean pattern: an attacker who knows the default threshold and
 stays under it evades detection with certainty (0/10 across 30 total
@@ -1399,7 +1391,7 @@ the same flag also has to survive. The third stops and restarts the
 entire `cage-control-plane` container, removing the API server, that
 node's Tetragon agent, and the audit log file all at once, the most
 severe single fault tested here. Each scenario ran 5 independent
-repetitions, 15 fault injections in total. Fig. 2 shows a representative
+repetitions, 15 fault injections in total. Fig. 13 shows a representative
 recovery timeline across all three, and Table VI-H reports the
 aggregated result per scenario with a Wilson 95% confidence interval on
 the recovery rate.
@@ -1663,7 +1655,7 @@ named here; timing fragmentation across the 120-second correlation
 window and binary renaming are the two we can name in advance, not an
 exhaustive list of what remains untested.
 
-This paper's comparison against related systems (Table II) is
+This paper's comparison against related systems (Table I) is
 qualitative, built from each system's own published description rather
 than a controlled, head-to-head measurement. The cheapest and
 highest-value quantitative addition, running vanilla Tetragon against
@@ -1739,10 +1731,14 @@ tooling oversight; it follows directly from what each domain can
 observe on its own. A shell spawned inside a container and the
 `kubectl exec` session that opened it are two halves of one action,
 visible to two different instruments, and nothing in either instrument
-knows the other half exists. CAGE's contribution is not the fact of
-combining these two sources; several existing tools have gestured at
-doing so. It is the specific mechanism that makes the combination
-trustworthy: resolving the Kubernetes pod UID reliably from an eBPF
+knows the other half exists. CAGE's contribution is not the general
+idea of fusing kernel-level and control-plane telemetry; provenance-
+and correlation-based systems adjacent to this problem already exist.
+None of them, however, actually combines these two specific sources,
+eBPF and the Kubernetes audit log; each sits on only one side of the
+boundary this paper addresses. CAGE's contribution is the specific
+mechanism that makes that combination trustworthy: resolving the
+Kubernetes pod UID reliably from an eBPF
 event stream that learns about container identity on a different
 schedule than the audit log does, and holding that identity steady
 enough that a technique detected by one source and a technique
@@ -1813,7 +1809,7 @@ written; these results describe CAGE's behavior against that specific
 attack set, not its robustness against an adversary who has read this
 paper and is deliberately probing for a way around it, beyond the one
 threshold boundary this work already measures directly. The comparison
-against related systems in Table II is built from each system's own
+against related systems in Table I is built from each system's own
 published description rather than a controlled measurement against the
 same attack set in the same cluster.
 
@@ -1823,7 +1819,7 @@ ablation infrastructure built for RQ2 already runs CAGE in a
 `tetragon_only` configuration; pointing that same configuration, unmodified,
 at a plain vanilla-Tetragon deployment with no CAGE correlation layer
 attached, against the same attack set used in this evaluation, would
-turn Table II's qualitative comparison into a direct, quantitative one
+turn Table I's qualitative comparison into a direct, quantitative one
 at comparatively little additional engineering cost, since the
 infrastructure this would require already runs in this project's
 cluster. Extending the pod-UID correlation key
@@ -1983,14 +1979,14 @@ runs, and pilot-scale files are kept alongside the full-scale ones
 | File | Rows | Backs |
 |---|---|---|
 | `results_detection_accuracy.csv` | 180 | Table IV, Fig. 5 (§VI-A) |
-| `results_ablation_full.csv` | 330 | Table V, Figs. 3-4 (§VI-B) |
+| `results_ablation_full.csv` | 330 | Table V, Figs. 6-7 (§VI-B) |
 | `results_chain_dedup.csv` | 50 | Table VI-C, Fig. 8 (§VI-C) |
-| `results_latency.csv` | 40 | Table VI-D, Fig. 6 (§VI-D) |
-| `results_latency_by_connage.csv` | 5 | Fig. 7 (§VI-D) |
-| `results_overhead.csv` | 242 | Table VI-E, Fig. 9 (§VI-E) |
+| `results_latency.csv` | 40 | Table VI-D, Fig. 9 (§VI-D) |
+| `results_latency_by_connage.csv` | 5 | Fig. 10 (§VI-D) |
+| `results_overhead.csv` | 242 | Table VI-E, Fig. 11 (§VI-E) |
 | `results_scalability.csv` | 45 | Table VI-F (§VI-F) |
-| `results_parameter_sensitivity.csv` | 60 | Table VII, Fig. 10 (§VI-G) |
-| `results_fault_recovery.csv` | 15 | Table VI-H, Fig. 2 (§VI-H) |
+| `results_parameter_sensitivity.csv` | 60 | Table VII, Fig. 12 (§VI-G) |
+| `results_fault_recovery.csv` | 15 | Table VI-H, Fig. 13 (§VI-H) |
 
 The first four rows live under `evaluation/person_a/output/`; the
 remaining five live under `evaluation/person_b/data/`.
@@ -1998,13 +1994,17 @@ remaining five live under `evaluation/person_b/data/`.
 **Figure and table generation.** Each figure is produced by a
 dedicated, single-purpose script that reads the corresponding CSV
 directly, so no figure depends on manually transcribed numbers.
-Detection-quality figures (Figs. 3-5, 8, 10) are generated by the
+Detection-quality figures (Figs. 5-8, 12) are generated by the
 scripts under `evaluation/person_a/plots/`; systems-characteristics
-figures (Figs. 2, 6, 7, 9) are generated by the scripts under
+figures (Figs. 9-11, 13) are generated by the scripts under
 `evaluation/person_b/plotting/`, which also includes `build_tables.py`
-for that half's result tables. Fig. 1, the Introduction's conceptual
-visibility-gap diagram, is the one exception: it is not data-driven
-and is generated by `evaluation/figures/plot_fig1_visibility_gap.py`.
+for that half's result tables. Figs. 1-4 are the exception: none is
+data-driven, so all four live under `evaluation/figures/`. Figs. 1
+and 4 are generated from Python scripts in that directory
+(`plot_fig1_visibility_gap.py`, `plot_fig4_detection_pipeline.py`);
+Figs. 2 and 3 are hand-authored SVG diagrams, refined directly rather
+than script-generated, with source `.svg` alongside the rendered
+`.pdf` and `.png`.
 All plotting scripts share a common style module
 (`evaluation/person_a/plots/style.py`) so that font, color palette,
 and figure sizing are consistent across every figure in this paper.
