@@ -409,22 +409,22 @@ that boundary sits.
 The design problem CAGE addresses is not simply that eBPF and the
 Kubernetes audit log each see half of an attack. It is that fusing them
 requires a join key, and neither of the two identifiers available at the
-surface qualifies as one. Pod name is reusable across pod restarts and,
-in an adversarial setting, chosen by whoever creates the pod; an earlier
-version of this codebase excluded its own infrastructure from detection
-by matching a pod-name prefix, and that exclusion was later recognized as
-a real evasion path, since any workload, including an attacker's own pod,
-that happened to match the excluded name pattern went completely
-unwatched. Pod IP is likewise reused as pods churn, and is not always
-resolvable at the exact instant an event is produced, because Kubernetes
-propagates pod identity through a watch stream that updates on its own
-schedule, independent of the kernel event stream eBPF produces. CAGE is
-built around a different identifier: the pod UID, assigned once by the
-Kubernetes API server, stable for the pod's entire lifetime, and not
-something a workload or an attacker can influence. Every design decision
-described in this section follows from committing to that identifier as
-the single correlation key shared across telemetry sources that would
-otherwise have no vocabulary in common.
+surface qualifies as one. Pod name is reusable across pod restarts, and
+in an adversarial setting it is chosen by whoever creates the pod. An
+earlier version of this codebase excluded its own infrastructure from
+detection by matching a pod-name prefix. That exclusion was later
+recognized as a real evasion path: any workload, including an attacker's
+own pod, that happened to match the excluded pattern went completely
+unwatched. Pod IP is likewise reused as pods churn. It is also not
+always resolvable at the exact instant an event is produced, because
+Kubernetes propagates pod identity through a watch stream that updates
+on its own schedule, independent of the kernel event stream eBPF
+produces. CAGE is built around a different identifier instead: the pod
+UID, assigned once by the Kubernetes API server, stable for the pod's
+entire lifetime, and not something a workload or an attacker can
+influence. Every design decision in this section follows from committing
+to that identifier as the single correlation key shared across telemetry
+sources that would otherwise have no vocabulary in common.
 
 CAGE runs as a single Python process with several daemon threads
 communicating through one shared, in-process event queue. A pod UID
@@ -434,26 +434,25 @@ stream and one for the Kubernetes audit log, independently tag every
 event they observe with a pod UID before placing it on the shared queue.
 A third, thread-pool-backed consumer polls pod network state directly as
 a complementary source for lateral-movement detection. A single
-correlator loop drains the shared queue, evaluates each event against a
-bounded per-identity temporal window to decide whether a technique or a
-multi-hop chain has fired, and forwards both raw events and any
-resulting alerts to a Flask server that exposes a REST API and two
+correlator loop drains the shared queue and evaluates each event against
+a bounded per-identity temporal window to decide whether a technique or
+a multi-hop chain has fired. It then forwards both raw events and any
+resulting alerts to a Flask server, which exposes a REST API and two
 Server-Sent Events streams to a browser dashboard (Fig. X). *[Fig. X,
 overall CAGE architecture; source and rendered versions at
 evaluation/figures/fig_X_architecture.svg / .pdf. Final figure number to
 be assigned during manuscript assembly.]*
 
 Two consequences follow from this structure. First, the hardest problem
-in the system is not any individual detection rule; it is establishing
+in the system is not any individual detection rule. It is establishing
 pod identity reliably enough, and fast enough, for two telemetry domains
-that learn about that identity at different speeds. Section IV-C
-describes that mechanism directly, because it is where most of the
+that learn about that identity at different speeds; Section IV-C
+describes that mechanism directly, since it is where most of the
 engineering effort in this codebase actually went. Second, once identity
 resolution and event normalization are handled, the detection logic
 itself is deliberately simple: bounded state, explicit thresholds, and no
-learned model standing between an event and an alert. That is a design
-trade-off, not an oversight, and it is discussed on its own terms in
-Section IV-E.
+learned model standing between an event and an alert. Section IV-E
+explains that simplicity as a deliberate trade-off in its own right.
 
 ### B. Telemetry Acquisition
 
@@ -463,111 +462,110 @@ third, complementary signal for one specific technique.
 The Tetragon consumer runs `tetra getevents` against Tetragon's DaemonSet
 through a persistent `kubectl exec` subprocess and reads its JSON event
 stream line by line. Two custom `TracingPolicy` resources extend
-Tetragon's default process-execution visibility: one attaches a kprobe to
-`tcp_connect` to observe outbound connections at the socket layer, and
-one attaches a kprobe to `cap_capable` filtered to four capability values
-(`CAP_SYS_ADMIN`, `CAP_SYS_PTRACE`, `CAP_SYS_MODULE`, `CAP_SYS_BOOT`) that
-are meaningful indicators of privilege escalation or container escape
-rather than ordinary container operation. If the subprocess exits or the
-stream ends, the consumer reconnects after a short fixed delay rather
-than escalating to a supervisor-level restart, since a missed handful of
-seconds of kernel telemetry is recoverable in a way that a crashed
-process is not.
+Tetragon's default process-execution visibility. One attaches a kprobe to
+`tcp_connect` to observe outbound connections at the socket layer. The
+other attaches a kprobe to `cap_capable`, filtered to four capability
+values (`CAP_SYS_ADMIN`, `CAP_SYS_PTRACE`, `CAP_SYS_MODULE`,
+`CAP_SYS_BOOT`) that are meaningful indicators of privilege escalation or
+container escape rather than ordinary container operation. If the
+subprocess exits or the stream ends, the consumer reconnects after a
+short fixed delay rather than escalating to a supervisor-level restart. A
+missed handful of seconds of kernel telemetry is recoverable in a way
+that a crashed process is not.
 
 The audit log consumer tails the API server's audit log file inside the
-control-plane container using `tail -F --retry`, a detail chosen
-deliberately over the more common `-f`: Kubernetes rotates the audit log
-in place once it reaches a configured size, and `-f` follows a file
-descriptor that a rotation invalidates, silently orphaning the reader,
-while `-F` reopens the path by name and survives the rotation. Each line
-is a structured audit record; the consumer only acts on records whose
-`stage` is `ResponseComplete`, since earlier stages describe a request
-that has not yet been authorized or completed and would otherwise let a
-denied request masquerade as a successful one.
+control-plane container, using `tail -F --retry` rather than the more
+common `-f`. Kubernetes rotates the audit log in place once it reaches a
+configured size. `-f` follows a file descriptor that a rotation
+invalidates, silently orphaning the reader; `-F` reopens the path by
+name instead, so it survives the rotation. Each line is a structured
+audit record. The consumer only acts on records whose `stage` is
+`ResponseComplete`; earlier stages describe a request that has not yet
+been authorized or completed, and treating one as an alert-worthy event
+would let a denied request masquerade as a successful one.
 
 A third source, the network monitor, addresses a limitation of relying
 on the `tcp_connect` kprobe alone for lateral-movement detection: kprobe
 coverage depends on a BTF-enabled kernel, a constraint documented in
 Section VIII that does not hold across every deployment environment. The
 network monitor is an independent, poll-based fallback that periodically
-executes `cat
-/proc/net/tcp` inside every monitored pod through `kubectl exec` and
-parses established connections directly from procfs. It does not require
-any kernel-level instrumentation at all, which makes it a genuinely
-complementary signal for the same technique (T1610) rather than a
-duplicate of the kprobe path. Because polling is not free, monitoring
-every pod sequentially would make the wall-clock time of one full sweep
-grow with the number of monitored pods; once that time exceeds the
-detection rule's own burst window, a genuine multi-destination scan can
-be split across two sweeps and never accumulate enough distinct
-destinations in one window to cross the detection threshold. This was
-found during development, not assumed in advance, and the fix was to
-poll all monitored pods concurrently through a thread pool sized to the
-pod count, bounding sweep time by the slowest single `kubectl exec` call
-rather than their sum. Section VI-F reports on the scalability of this
-design directly.
+executes `cat /proc/net/tcp` inside every monitored pod through `kubectl
+exec` and parses established connections directly from procfs. It does
+not require any kernel-level instrumentation at all, which makes it a
+genuinely complementary signal for the same technique (T1610) rather
+than a duplicate of the kprobe path. Because polling is not free,
+monitoring every pod sequentially would make the wall-clock time of one
+full sweep grow with the number of monitored pods. Once that time
+exceeds the detection rule's own burst window, a genuine
+multi-destination scan can be split across two sweeps, never
+accumulating enough distinct destinations in one window to cross the
+detection threshold. This behavior surfaced during development rather
+than being anticipated up front. The fix polls all monitored pods
+concurrently through a thread pool sized to the pod count, bounding
+sweep time by the slowest single `kubectl exec` call rather than their
+sum. Section VI-F reports on the scalability of this design directly.
 
 ### C. Pod UID Identity Resolution
 
-Resolving a pod UID from the audit log is comparatively direct: certain
+Resolving a pod UID from the audit log is comparatively direct. Certain
 audit record types, in particular a Secret access performed from inside
 a pod using that pod's mounted service account token, carry pod name and
-pod UID as structured fields under the request's `user.extra` metadata,
-placed there by the API server itself rather than inferred by CAGE.
-Resolving a pod UID from an eBPF event is not direct at all, and this is
-the part of the system where the identity race described in Section IV-A
-actually has to be handled.
+pod UID as structured fields under the request's `user.extra` metadata.
+The API server places these fields there itself; CAGE does not have to
+infer them. Resolving a pod UID from an eBPF event is not direct at all,
+and this is the part of the system where the identity race described in
+Section IV-A actually has to be handled.
 
 The pod UID cache is populated by a long-running Kubernetes watch over
-all pods across all namespaces, thread-safe and indexed three ways: by
-`(namespace, name)`, by pod IP, and by `(namespace, service account)`.
-The watch reconnects with exponential backoff on failure, and the cache
-exposes a `degraded` flag once failures cross a small consecutive-failure
-threshold, so that a caller can distinguish "no recent activity" from
-"identity resolution is not currently trustworthy." This flag feeds
-observability only; it does not gate detection, a separation of concerns
-discussed in Section IV-G.
+all pods across all namespaces. It is thread-safe and indexed three
+ways: by `(namespace, name)`, by pod IP, and by `(namespace, service
+account)`. The watch reconnects with exponential backoff on failure.
+Once failures cross a small consecutive-failure threshold, the cache
+exposes a `degraded` flag, letting a caller distinguish "no recent
+activity" from "identity resolution is not currently trustworthy." This
+flag is informational. It does not gate detection; Section IV-G
+discusses that separation of concerns further.
 
 Tetragon events do not always carry a usable pod reference directly.
 When they do, resolution is immediate: the event's own `pod.uid` field is
 looked up in the cache. When they do not, and Tetragon reports only a
-raw container identifier, CAGE falls back to a container-ID map built
-once at startup and refreshed every three seconds from the Kubernetes
-API's own container status records, matched against prefixes of the
-lengths Tetragon itself uses for that identifier. A three-second refresh
-cadence is a deliberate compromise: refreshing on every event would mean
-querying the Kubernetes API once per exec, which does not scale with
-event volume, while a much longer interval would leave short-lived
-containers unresolvable for most of their existence. To close that gap
-further, the consumer also learns container-ID associations directly
-from `runc` invocations it observes in the same event stream, extracting
-the full container identifier from the invocation's own arguments and
-caching the association immediately, without waiting for the next
-periodic refresh at all.
+raw container identifier, CAGE falls back to a container-ID map instead.
+This map is built once at startup and refreshed every three seconds from
+the Kubernetes API's own container status records, matched against the
+prefix lengths Tetragon itself uses for that identifier. The
+three-second cadence balances two costs. Refreshing on every event would
+mean querying the Kubernetes API once per exec, which does not scale
+with event volume. A much longer interval, on the other hand, would
+leave short-lived containers unresolvable for most of their existence.
+To close that gap further, the consumer also learns container-ID
+associations directly from `runc` invocations it observes in the same
+event stream. It extracts the full container identifier from the
+invocation's own arguments and caches the association immediately,
+without waiting for the next periodic refresh.
 
 Even with both mechanisms running, a process can execute and be reported
 by eBPF before either one has had a chance to resolve its container.
-Rather than silently dropping such events, or blocking the consumer
-thread until resolution succeeds, unresolved events that plausibly
-reference a container are placed in a small retry buffer and
-re-attempted every 300 milliseconds for up to two seconds; anything still
-unresolved after that window is dropped and logged explicitly, on the
-premise that an event genuinely un-attributable to any live pod after
-two seconds is unlikely to become attributable later (Fig. Y). *[Fig. Y,
-pod UID resolution workflow; source and rendered versions at
+CAGE does not silently drop these events, nor does it block the consumer
+thread until resolution succeeds. Instead, any event that plausibly
+references a container is placed in a small retry buffer and
+re-attempted every 300 milliseconds, for up to two seconds. Anything
+still unresolved after that window is dropped and logged explicitly; an
+event genuinely un-attributable to any live pod after two seconds is
+unlikely to become attributable later (Fig. Y). *[Fig. Y, pod UID
+resolution workflow; source and rendered versions at
 evaluation/figures/fig_Y_uid_resolution.svg / .pdf. Final figure number
 to be assigned during manuscript assembly.]*
 
 Every event tagging function additionally discards events whose resolved
 namespace falls in a small set of cluster-infrastructure namespaces,
 before the event is queued at all rather than only inside each detection
-rule. This ordering matters for reasons beyond correctness: a live
+rule. This ordering matters for reasons beyond correctness. A live
 measurement on an otherwise idle cluster found that cluster-infrastructure
 activity, chiefly `kube-proxy`'s continual iptables resynchronization,
-accounted for 77% of total eBPF event volume, and letting all of it reach
-the queue only to be discarded by every detection rule downstream would
-waste processing time on events that can never produce an alert either
-way.
+accounted for 77% of total eBPF event volume. Letting all of it reach
+the queue, only to be discarded by every detection rule downstream,
+would waste processing time on events that can never produce an alert
+either way.
 
 ### D. Event Normalization
 
@@ -577,16 +575,16 @@ record of a binary, its arguments, and its process lineage; an audit
 record is a control-plane request described by verb, resource type, and
 requesting identity. CAGE's normalization layer, implemented separately
 in each consumer, converts both into one common event shape before
-either is exposed to a detection rule: an `event_type` field
-(`process_exec`, `capability_check`, `network_connect`,
+either is exposed to a detection rule. That shape has an `event_type`
+field (`process_exec`, `capability_check`, `network_connect`,
 `k8s_secret_access`, `pod_exec`, `privileged_pod_created`, `rbac_abuse`,
 `rbac_discovery`), a resolved pod UID, pod name, and namespace, a
 timestamp, and a small number of fields specific to that event type. This
-common shape is what makes the rest of the system source-agnostic: the
+common shape is what makes the rest of the system source-agnostic. The
 correlation logic that follows operates entirely on this normalized
-representation and, with the exception of the source attribution kept
-for observability, has no notion of which telemetry domain an event
-originated from.
+representation and has no notion of which telemetry domain an event
+originated from, except for the source attribution kept for
+observability.
 
 ### E. Temporal Correlation and the Causal Graph
 
@@ -594,62 +592,62 @@ The correlation engine is deliberately simple relative to what its name
 suggests, and it is worth being precise about that rather than letting
 the name imply more than the implementation does. `CausalGraph`
 maintains a `networkx` directed graph whose nodes are pod identities,
-added as events arrive; it does not currently populate edges on that
-graph, and the graph the dashboard renders is synthesized independently,
+added as events arrive. It does not currently populate edges on that
+graph; the graph the dashboard renders is synthesized independently, as
 described in Section IV-G. The mechanism that actually decides whether a
 technique or a multi-hop chain has fired is a bounded, per-pod-UID
 sliding window of recent normalized events, held for 120 seconds and
 pruned against each new event's own timestamp. Individual technique
 rules test this window, or the incoming event alone, against explicit
-conditions: a shell binary observed inside a pod, a burst of connections
-to five or more distinct destination pods within ten seconds, twenty-five
-or more process executions from one pod within ten seconds, ten or more
-reads of RBAC objects by one identity within thirty seconds, and similar
-conditions for the remaining techniques listed in Table I. Chain
-detection reuses the same window rather than running a separate pass: a
-chain such as remote-exec-then-shell-then-secret-access is checked by
-testing whether the relevant event types or binaries co-occur within the
-same 120-second window for the same pod UID, not by traversing a
-persisted graph structure.
+conditions. Examples include a shell binary observed inside a pod, a
+burst of connections to five or more distinct destination pods within
+ten seconds, twenty-five or more process executions from one pod within
+ten seconds, and ten or more reads of RBAC objects by one identity
+within thirty seconds; the remaining techniques in Table I follow the
+same pattern. Chain detection reuses the same window rather than running
+a separate pass. A chain such as remote-exec-then-shell-then-secret-access
+is checked by testing whether the relevant event types or binaries
+co-occur within the same 120-second window for the same pod UID, not by
+traversing a persisted graph structure.
 
 This design is a deliberate trade-off. A learned, graph-based approach,
 of the kind KAIROS and UNICORN take at the operating-system level, can in
-principle generalize to attack patterns nobody enumerated in advance, at
-the cost of a decision boundary that depends on training data and is not
-fully disclosable. CAGE's bounded-window approach cannot generalize
-beyond its explicit rule set, but every alert it produces traces to one
-named rule and one disclosed threshold, which is exactly the property
-the evasion-boundary evaluation in Section VI-G measures directly, and it
-is also why the system's resource cost stays flat under load rather than
-scaling with the complexity of a model's inference cost, as reported in
-Section VI-E.
+principle generalize to attack patterns nobody enumerated in advance.
+That generality comes at a cost: a decision boundary that depends on
+training data and is not fully disclosable. CAGE's bounded-window
+approach cannot generalize beyond its explicit rule set. In exchange,
+every alert it produces traces to one named rule and one disclosed
+threshold, exactly the property the evasion-boundary evaluation in
+Section VI-G measures directly. That same simplicity is why the system's
+resource cost stays flat under load, rather than scaling with the
+complexity of a model's inference cost, as reported in Section VI-E.
 
 A pod UID is a long-lived identifier that can be reused across many
 separate, unrelated incidents over a pod's lifetime; nothing in
 Kubernetes destroys a pod merely because it triggered an alert. This has
-a direct consequence for how chain state must be managed: a chain or
+a direct consequence for how chain state must be managed. A chain or
 burst condition that, once satisfied, is marked as fired permanently for
 that pod UID would silently prevent any later, genuinely independent
 incident on the same long-lived workload from ever being reported again.
-CAGE's chain and burst detectors are instead episode-scoped: a firing key
+CAGE's chain and burst detectors are instead episode-scoped. A firing key
 is retained only while its underlying condition remains continuously
-satisfied, and is explicitly discarded the moment that condition goes
-false, so that a later, separate episode on the same identity can fire
-the same rule again. This is not a hypothetical concern. An earlier
-version of the fork-bomb detector (T1499) added its firing key once and
-never removed it, meaning a pod that triggered it once could never
-trigger it again for the rest of its lifetime; the defect was found and
-fixed during this project's own evaluation effort, verified live by
-firing two independent bursts against the same long-lived pod after the
-fix and confirming both were reported. Section VII discusses this and
-several related defects found the same way, by running the system rather
-than only reading it.
+satisfied, and is discarded the moment that condition goes false. A
+later, separate episode on the same identity can then fire the same rule
+again. This is not a hypothetical concern. An earlier version of the
+fork-bomb detector (T1499) added its firing key once and never removed
+it, so a pod that triggered it once could never trigger it again for the
+rest of its lifetime. This defect was found and fixed during this
+project's own evaluation effort. The fix was verified live, by firing
+two independent bursts against the same long-lived pod and confirming
+both were reported. Section VII discusses this and several related
+defects found the same way, by running the system rather than only
+reading it.
 
-Because the per-pod-UID state described above accumulates for every pod
-that has ever produced an event, and pods in a real deployment churn
-continuously, CAGE periodically sweeps and discards tracking state for
-any pod UID with no activity in the last 120 seconds, the same duration
-as the correlation window itself. This runs on an event-count cadence
+The per-pod-UID state described above accumulates for every pod that has
+ever produced an event, and pods in a real deployment churn continuously.
+CAGE therefore periodically sweeps and discards tracking state for any
+pod UID with no activity in the last 120 seconds, the same duration as
+the correlation window itself. This runs on an event-count cadence
 rather than a wall-clock timer, avoiding a dedicated background thread
 purely for garbage collection.
 
@@ -683,50 +681,49 @@ checks, with alerts and graph-node updates as the two outputs.]*
 
 Five multi-hop sequences of these techniques are escalated to a CRITICAL
 correlated chain alert when their constituent legs are satisfied on the
-same pod UID within the shared 120-second window: T1059 to T1552 (shell
-then credential access), T1021 to T1059 to T1552 (the full remote-exec
-lateral-movement path), T1059 to T1610 to T1552 (shell, then a network
-scan burst, then credential access), T1059 to T1548 to T1611 (shell,
-privilege escalation, then a container-escape indicator), and T1611 to
-T1552 (an escape indicator followed by credential access). A chain alert
-is strictly stronger evidence than any of its constituent per-technique
-alerts on their own, since it requires several independent detectors to
-agree on the same identity within a bounded time.
+same pod UID within the shared 120-second window. These are: T1059 to
+T1552 (shell then credential access); T1021 to T1059 to T1552 (the full
+remote-exec lateral-movement path); T1059 to T1610 to T1552 (shell, then
+a network scan burst, then credential access); T1059 to T1548 to T1611
+(shell, privilege escalation, then a container-escape indicator); and
+T1611 to T1552 (an escape indicator followed by credential access). A
+chain alert is strictly stronger evidence than any of its constituent
+per-technique alerts on their own, since it requires several independent
+detectors to agree on the same identity within a bounded time.
 
 One rule is a deliberate, disclosed exception to an otherwise consistent
 scope-exclusion policy. T1021 (`kubectl exec`) carries no namespace
 exclusion at all, and fires on any remote exec into any pod, including
 routine administrative access into cluster-infrastructure components.
-This is an accepted precision cost, not an oversight: excluding
-infrastructure namespaces from this specific rule would also exclude a
-real attacker's remote-exec session into a compromised infrastructure
-pod, which is exactly the kind of access this rule exists to catch. Every
-other behavioral rule excludes cluster-infrastructure namespaces
-explicitly, and does so by namespace rather than by pod name, for the
-same evasion-resistance reason described in Section IV-A.
+This precision cost is accepted deliberately. Excluding infrastructure
+namespaces from this specific rule would also exclude a real attacker's
+remote-exec session into a compromised infrastructure pod, exactly the
+access this rule is meant to catch. Every other behavioral rule excludes
+cluster-infrastructure namespaces explicitly, by namespace rather than by
+pod name, for the same evasion-resistance reason given in Section IV-A.
 
 ### G. Alert Generation and Dashboard Integration
 
 Detection and visualization share the same event stream by construction,
 not by two independent systems agreeing to stay in sync. A single loop
-dequeues each normalized event once, evaluates it against the causal
-graph, and, from the same event and the same resulting alerts, both
-updates internal state and pushes to two independent sets of Server-Sent
-Events subscribers, one for raw events and one for alerts, over a REST
-API served by the same process. This matters for what the dashboard can
-be trusted to show: because the visualization layer consumes exactly the
-events the detector consumed, and nothing else, what an operator sees on
-the live graph is never a best-effort approximation of what was
-evaluated. The graph itself, exposed through a `/api/graph` endpoint, is
-reconstructed on each request directly from the current pod cache and
-the accumulated alert list, coloring each pod node by its highest
-observed alert severity and synthesizing an edge for each alert type
-(a self-loop for an in-pod behavior such as a shell spawn or a privilege
-escalation attempt, a directed edge to a synthetic external node for a
-remote-exec session, an edge between two real pod nodes for a lateral
-network connection), rather than being read back from a persisted graph
-structure inside the correlator itself. The browser dashboard renders
-this as an interactive canvas graph, alongside a MITRE technique
+dequeues each normalized event once and evaluates it against the causal
+graph. From that same event, and the same resulting alerts, it both
+updates internal state and pushes to two independent sets of
+Server-Sent Events subscribers, one for raw events and one for alerts,
+over a REST API served by the same process. This matters for what the
+dashboard can be trusted to show. The visualization layer consumes
+exactly the events the detector consumed, and nothing else, so what an
+operator sees on the live graph is never a best-effort approximation of
+what was evaluated. The graph itself is exposed through a `/api/graph`
+endpoint. Rather than being read back from a persisted graph structure
+inside the correlator, it is reconstructed on each request directly from
+the current pod cache and the accumulated alert list. Each pod node is
+colored by its highest observed alert severity, and each alert type
+synthesizes its own kind of edge: a self-loop for an in-pod behavior such
+as a shell spawn or a privilege escalation attempt, a directed edge to a
+synthetic external node for a remote-exec session, or an edge between two
+real pod nodes for a lateral network connection. The browser dashboard
+renders this as an interactive canvas graph, alongside a MITRE technique
 reference panel, a kill-chain step indicator for correlated alerts, and a
 per-source health view.
 
@@ -734,22 +731,22 @@ That health view is deliberately kept separate from the detection path.
 A `/api/health` endpoint reports, for each telemetry source, whether its
 consumer is enabled for the current configuration, whether its
 subprocess is still alive, and how long it has been since that source
-last produced an event, flagging a source as stale past a fixed
-threshold. None of this bookkeeping influences whether an event is
-processed or an alert fires; it exists purely so that degraded telemetry
-health is observable rather than silently masked, which is the property
-the fault-injection evaluation in Section VI-H exercises directly. The
-same separation applies to the UID cache's own `degraded` flag from
-Section IV-C: it reports on resolution health without ever gating
-whether an already-resolved event is processed.
+last produced an event. A source is flagged as stale once that silence
+passes a fixed threshold. None of this bookkeeping influences whether an
+event is processed or an alert fires. Its only purpose is to make
+degraded telemetry health observable rather than silently masked, a
+property the fault-injection evaluation in Section VI-H exercises
+directly. The same separation applies to the UID cache's own `degraded`
+flag from Section IV-C, which reports on resolution health without ever
+gating whether an already-resolved event is processed.
 
 Finally, CAGE supports running with any one telemetry source disabled
 (`tetragon_only`, `audit_only`, or the default `fused` configuration
 with all sources active), controlled by a single environment variable
-read at startup. This was not added as a convenience feature; it exists
-specifically so that the ablation study in Section VI-B could measure,
-directly rather than by argument, what each telemetry source
-individually contributes and what fusing them recovers.
+read at startup. This configurability exists for one reason: it lets the
+ablation study in Section VI-B measure, directly rather than by argument,
+what each telemetry source individually contributes and what fusing them
+recovers.
 
 ## V. Evaluation Methodology
 
