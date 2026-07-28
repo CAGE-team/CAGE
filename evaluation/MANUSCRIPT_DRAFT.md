@@ -541,6 +541,12 @@ inference. An earlier version of the E1 script used exactly such an
 inference, a shared 30-second alert-to-event matching window, and was
 found to silently misclassify results for fast-firing techniques
 (§VII); this was corrected before the results in §VI-A were collected.
+Chain re-fire rate (E3) uses this same per-trial scoping, keyed to
+CAGE's episode-scoped deduplication (§IV): a chain re-arms once its
+constituent legs are no longer all satisfied, so a genuinely later,
+independent episode on the same pod UID can fire it again. §VI-C tests
+this re-arm behavior across ten independent episodes per chain.
+
 For the systems experiments: **detection latency** (E4) is measured
 wall-clock-to-wall-clock from the attack command's issuance to the
 corresponding alert line appearing in the server log; **resource
@@ -560,11 +566,12 @@ and cannot by construction prove recovery before new traffic occurs
 per-technique recall (E1), ablation detection rate (E2), chain re-fire
 rate (E3), evasion-boundary fired-or-not-fired rate (E9), and
 per-scenario functional-recovery rate (E8), are reported with **Wilson
-score 95% confidence intervals**, not the normal (Wald) approximation,
-because Wilson intervals remain well-behaved at the sample sizes used
-here and at the 0%/100% observed rates that occur throughout this
-evaluation, where the Wald interval degenerates to zero width and
-misrepresents the true uncertainty. Detection-quality experiments use
+score 95% confidence intervals** [14] rather than the normal (Wald)
+approximation, which degenerates to zero width at the 0%/100% observed
+rates that occur throughout this evaluation and misrepresents the true
+uncertainty at these sample sizes. (For x successes in n trials, with
+p_hat = x/n and z = 1.96: CI = (p_hat + z^2/2n +/- z *
+sqrt(p_hat(1-p_hat)/n + z^2/4n^2)) / (1 + z^2/n).) Detection-quality experiments use
 N=10 trials per condition; fault-injection trials (E8) use N=5
 repetitions per scenario. Both sample sizes were set by the practical
 constraints of a live-cluster, human-supervised evaluation rather than
@@ -1222,18 +1229,20 @@ available: arXiv:2308.05034.
 Republic of Korea, Nov. 2021, pp. 13–24. Also available:
 arXiv:2103.14628.
 
-*(Additional references still needed before submission: the Wilson
-score interval's original source [E. B. Wilson, "Probable inference,
-the law of succession, and statistical inference," J. Amer. Statist.
-Assoc., vol. 22, no. 158, pp. 209–212, 1927], to be cited by name once
-§V's methodology section gets its own citation pass, and any further
-general Kubernetes/container-security survey citations a reviewer might
-expect in §I's opening framing. [9]-[13] were added during the Related
-Work pass and verified by direct retrieval of each source's own text or
-abstract (full first-page text extracted for [4], [11], [12], and [13];
-verbatim abstract for [1]-[10]), the same standard applied to [1]-[8];
-further citations should meet the same bar rather than being added for
-count alone.)*
+[14] E. B. Wilson, "Probable inference, the law of succession, and
+statistical inference," *J. Amer. Statist. Assoc.*, vol. 22, no. 158,
+pp. 209–212, 1927.
+
+*(Additional references still needed before submission: general
+Kubernetes/container-security survey citations a reviewer might expect
+in §I's opening framing. [9]-[14] were added during the Related Work
+and Evaluation Methodology passes and verified by direct retrieval of
+each source's own text or abstract (full first-page text extracted for
+[4], [11], [12], and [13]; verbatim abstract for [1]-[10]; [14] is a
+standard, widely-cited statistics reference confirmed by name and
+citation details), the same standard applied to [1]-[8]; further
+citations should meet the same bar rather than being added for count
+alone.)*
 
 ---
 
