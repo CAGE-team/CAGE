@@ -1,0 +1,132 @@
+<svg viewBox="0 0 1060 950" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica, Arial, sans-serif" role="img">
+  <title>Fig. Y: Pod UID resolution workflow</title>
+  <desc>An eBPF event resolves its pod UID through direct pod reference, a learned container-exec mapping, or a periodically refreshed container-ID map; unresolved events enter a bounded 300-millisecond retry loop for up to two seconds before being dropped.</desc>
+
+  <defs>
+    <marker id="arrowY" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrowYes" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#15803d"/>
+    </marker>
+    <marker id="arrowNo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b91c1c"/>
+    </marker>
+  </defs>
+
+  <style>
+    .start { fill:#f1f5f9; stroke:#334155; stroke-width:2; rx:24; }
+    .decision { fill:#fff7ed; stroke:#c2410c; stroke-width:2; }
+    .store { fill:#dbeafe; stroke:#1d4ed8; stroke-width:1.5; stroke-dasharray:4,3; rx:8; }
+    .resolved { fill:#dcfce7; stroke:#15803d; stroke-width:2; rx:8; }
+    .dropped { fill:#fee2e2; stroke:#b91c1c; stroke-width:2; rx:8; }
+    .proc { fill:#f1f5f9; stroke:#334155; stroke-width:2; rx:8; }
+    .title { font-size:14.5px; font-weight:600; fill:#0f172a; }
+    .sub { font-size:12px; fill:#475569; }
+    .lbl { font-size:11.5px; font-weight:600; }
+    .arrow { stroke:#334155; stroke-width:2; fill:none; marker-end:url(#arrowY); }
+    .yes { stroke:#15803d; stroke-width:2; fill:none; marker-end:url(#arrowYes); }
+    .no { stroke:#b91c1c; stroke-width:2; fill:none; marker-end:url(#arrowNo); }
+  </style>
+
+  <!-- Start -->
+  <rect class="start" x="360" y="15" width="280" height="55"/>
+  <text x="500" y="38" text-anchor="middle" class="title">eBPF event arrives</text>
+  <text x="500" y="56" text-anchor="middle" class="sub">process_exec / capability_check / network_connect</text>
+
+  <path class="arrow" d="M500,70 V95"/>
+
+  <!-- Decision 1: direct pod ref -->
+  <polygon class="decision" points="500,95 660,150 500,205 340,150"/>
+  <text x="500" y="140" text-anchor="middle" class="sub">Event carries a direct</text>
+  <text x="500" y="156" text-anchor="middle" class="sub">pod object (uid field)?</text>
+
+  <text x="545" y="112" class="lbl" fill="#15803d">yes</text>
+  <path class="yes" d="M615,128 C700,110 760,118 800,128"/>
+
+  <text x="500" y="222" text-anchor="middle" class="lbl" fill="#b91c1c">no</text>
+  <path class="no" d="M500,205 V235"/>
+
+  <!-- Decision 2: learned runc-exec mapping -->
+  <polygon class="decision" points="500,235 680,300 500,365 320,300"/>
+  <text x="500" y="290" text-anchor="middle" class="sub">Container ID in learned</text>
+  <text x="500" y="306" text-anchor="middle" class="sub">runc-exec mapping?</text>
+  <text x="500" y="322" text-anchor="middle" class="sub">(exec_container_map)</text>
+
+  <text x="565" y="262" class="lbl" fill="#15803d">yes</text>
+  <path class="yes" d="M635,275 C740,230 770,180 800,152"/>
+
+  <text x="500" y="382" text-anchor="middle" class="lbl" fill="#b91c1c">no</text>
+  <path class="no" d="M500,365 V395"/>
+
+  <!-- Decision 3: docker map -->
+  <polygon class="decision" points="500,395 690,465 500,535 310,465"/>
+  <text x="500" y="450" text-anchor="middle" class="sub">Container ID matches</text>
+  <text x="500" y="466" text-anchor="middle" class="sub">docker-ID map, prefix</text>
+  <text x="500" y="482" text-anchor="middle" class="sub">15 / 12 / 8 chars?</text>
+
+  <text x="575" y="422" class="lbl" fill="#15803d">yes</text>
+  <path class="yes" d="M650,435 C760,350 780,220 800,175"/>
+
+  <text x="500" y="552" text-anchor="middle" class="lbl" fill="#b91c1c">no</text>
+  <path class="no" d="M500,535 V565"/>
+
+  <!-- Resolved merge box -->
+  <rect class="resolved" x="800" y="120" width="180" height="60"/>
+  <text x="890" y="145" text-anchor="middle" class="title">Pod UID resolved</text>
+  <text x="890" y="163" text-anchor="middle" class="sub">tag · filter · enqueue</text>
+
+  <!-- Data stores feeding decisions 2 and 3 -->
+  <rect class="store" x="720" y="255" width="220" height="60"/>
+  <text x="830" y="278" text-anchor="middle" class="sub" font-weight="600">exec_container_map</text>
+  <text x="830" y="295" text-anchor="middle" class="sub">learned from runc invocations</text>
+  <path class="arrow" d="M720,285 H680" stroke-dasharray="4,3"/>
+
+  <rect class="store" x="720" y="415" width="220" height="70"/>
+  <text x="830" y="438" text-anchor="middle" class="sub" font-weight="600">docker_map</text>
+  <text x="830" y="455" text-anchor="middle" class="sub">rebuilt every 3s from K8s API</text>
+  <text x="830" y="470" text-anchor="middle" class="sub">container status records</text>
+  <path class="arrow" d="M720,450 H690" stroke-dasharray="4,3"/>
+
+  <!-- Retry buffer -->
+  <rect class="proc" x="360" y="565" width="280" height="70"/>
+  <text x="500" y="592" text-anchor="middle" class="title">Retry buffer</text>
+  <text x="500" y="610" text-anchor="middle" class="sub">re-attempt all three checks every 300ms</text>
+  <text x="500" y="625" text-anchor="middle" class="sub">held for up to 2 seconds</text>
+
+  <path class="arrow" d="M500,635 V660"/>
+
+  <!-- Decision 4: resolved within window -->
+  <polygon class="decision" points="500,660 660,715 500,770 340,715"/>
+  <text x="500" y="710" text-anchor="middle" class="sub">Resolved before</text>
+  <text x="500" y="726" text-anchor="middle" class="sub">2s elapses?</text>
+
+  <!-- Orthogonal routing, terminating at the box's RIGHT edge (x=980).
+       An earlier version ended at x=800 (the box's LEFT edge), which
+       meant the horizontal final segment cut straight across the box's
+       full width at y=150, directly through both lines of its text. -->
+  <text x="880" y="705" class="lbl" fill="#15803d">yes</text>
+  <path class="yes" d="M660,715 H980 V152"/>
+
+  <text x="500" y="795" text-anchor="middle" class="lbl" fill="#b91c1c">no</text>
+  <path class="no" d="M500,770 V800"/>
+
+  <!-- Dropped -->
+  <rect class="dropped" x="400" y="800" width="200" height="60"/>
+  <text x="500" y="825" text-anchor="middle" class="title">Event dropped</text>
+  <text x="500" y="843" text-anchor="middle" class="sub">logged explicitly, not silent</text>
+
+  <!-- Pod UID Cache note (used by the direct-reference path) -->
+  <rect class="store" x="60" y="95" width="230" height="60"/>
+  <text x="175" y="118" text-anchor="middle" class="sub" font-weight="600">Pod UID Cache</text>
+  <text x="175" y="135" text-anchor="middle" class="sub">K8s watch API, live index</text>
+  <path class="arrow" d="M290,125 H340" stroke-dasharray="4,3"/>
+
+  <!-- Legend -->
+  <rect x="60" y="900" width="18" height="14" class="store"/>
+  <text x="88" y="911" class="sub">refreshed / learned data store</text>
+  <rect x="300" y="900" width="18" height="14" class="resolved"/>
+  <text x="328" y="911" class="sub">resolved</text>
+  <rect x="420" y="900" width="18" height="14" class="dropped"/>
+  <text x="448" y="911" class="sub">dropped after 2s window</text>
+</svg>
