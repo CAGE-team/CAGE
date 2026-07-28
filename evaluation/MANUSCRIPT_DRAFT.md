@@ -1467,164 +1467,265 @@ distinguish an infrastructure problem from a detection problem.
 
 ## VII. Lessons from Live-System Evaluation
 
-Several real defects were found only by executing each half of this
-evaluation against live infrastructure, not by code review or testing
-against synthetic data. From the detection-quality evaluation:
+The results in §VI describe what CAGE detects and what that detection
+costs. This section describes something different: what building and
+evaluating CAGE against real, running infrastructure taught us about
+designing and testing systems of this kind, independent of any
+specific number reported above. Two people evaluated two structurally
+different halves of the same codebase in parallel, one testing
+detection logic, the other testing systems behavior, and each
+surfaced real defects the other never encountered and neither
+anticipated in advance. That pattern itself is the section's central
+argument, developed through the specific lessons below rather than
+asserted on its own.
 
-1. A fork-bomb detector (T1499) whose deduplication state was never
-   cleared once set, meaning the rule could fire at most **once** for a
-   given pod's entire lifetime — a genuine detection gap for any
-   workload subject to more than one such burst, not merely a test
-   artifact. Fixed by adding the same episode-scoped re-arm logic already
-   used by the chain correlator (§IV).
-2. A metrics-collection scheme whose 30-second alert-to-event matching
-   window silently reclassified benign-trial false positives as true
-   positives for techniques with near-zero detection latency, because a
-   benign trial's alert fell within the matching window of a nearby
-   *malicious* trial's own event. This would have reported spuriously
-   high precision for exactly the techniques (T1021, T1611) whose design
-   guarantees they fire unconditionally.
-3. A chain-alert search pattern containing a literal Unicode-arrow
-   (`→`) versus ASCII-hyphen (`->`) mismatch against the system's actual
-   log output — indistinguishable, without direct log inspection, from a
-   genuine detection failure.
-4. Several evaluation-script crashes caused by uncaught transient
-   subprocess timeouts, which — combined with an evaluation script that
-   originally wrote its results only once, at completion — meant a single
-   momentary `kubectl` hiccup an hour into an N=10 run could discard every
-   trial collected up to that point. Fixed by catching the timeout at the
-   call site and by writing every result to disk immediately after each
-   trial rather than only at the end.
+**Fusing two telemetry domains requires a shared vocabulary, not just
+two working consumers.** Tetragon events describe a binary, its
+arguments, and its process lineage; audit records describe a verb, a
+resource, and a requesting identity. Running both consumers correctly
+was not sufficient to get the correlation this paper's architecture
+depends on; each had to be rewritten into one common event shape
+before a single chain rule could test them together. A system that
+instruments two sources without this normalization step would still
+see everything CAGE sees, but would have no way to reason about it as
+one incident.
 
-From the systems-characteristics evaluation, independently:
+**Correlation state tied to a Kubernetes-native identity needs to
+re-arm, not just match.** A pod UID is not retired when it triggers an
+alert; it can persist for a workload's entire operational lifetime,
+compromised and remediated more than once. An earlier version of the
+fork-bomb detector treated its own firing key as permanent, so a pod
+that triggered it a first time could never trigger it again. The
+mistake was not in the matching logic, which was correct, but in an
+implicit assumption that firing once was the end of the story. The fix
+generalizes beyond this one detector: any correlation state keyed to a
+long-lived, reusable identifier needs an explicit condition for
+clearing itself, or it silently degrades into a permanent allowlist
+for exactly the workloads an operator most needs to keep watching.
 
-5. A stale restart-wrapper process silently mistaken for the CAGE server
-   by substring-based `pgrep` matching, corrupting two full-scale
-   measurements (E5 resource overhead, reporting 0.0% CPU / 1.7MB RSS for
-   a process that was not actually the server; E8 functional-recovery,
-   pointing the recovery check at the wrong log file for 13 of 15
-   trials) before detection. Both were caught by sanity-checking against
-   physically plausible ranges, fixed by disambiguating the true server
-   process, and re-run clean.
+**Evaluation tooling fails in ways that have nothing to do with the
+system it is testing, and deserves the same scrutiny.** A
+metrics-collection script that matched alerts to events using a shared
+30-second window, rather than each trial's own scoped log region,
+would have silently reported inflated precision for the two techniques
+whose design makes them fire unconditionally, exactly where an
+inflated number would have been least noticeable and most misleading.
+Separately, a chain-alert search pattern written against a literal
+Unicode arrow failed to match the system's own ASCII-rendered log
+output, a discrepancy indistinguishable from a real detection failure
+without opening the log directly. Neither defect lived in the
+detection logic being measured. Both would have produced results that
+looked complete and internally consistent while being wrong.
 
-Two independent evaluation efforts on the same codebase, testing
-different subsystems (detection logic versus systems performance),
-each surfaced multiple defects invisible to code review; neither found
-the other's defects by inspection, and neither anticipated the other's
-specific failure mode in advance. We surface this not as an incidental
-footnote but as a methodological claim: for systems whose correctness
-depends on multi-source event timing and cross-process state — dedup
-flags, correlation windows, alert buffers, or process-identity
-bookkeeping — static analysis and unit-level testing are necessary but
-not sufficient, and an evaluation pipeline that never executes against
-the live target system risks reporting fabricated confidence.
+**Kubernetes deployment realities are a distinct cost from detection
+accuracy, and belong in the evaluation, not just the changelog.**
+T1610's kprobe-based path depends on a BTF-enabled kernel that not
+every managed offering exposes. Reading the audit log at all requires
+patching the API server's own manifest, a step some managed control
+planes do not permit. Even inside a fully self-managed `kind` cluster,
+an audit-policy file mounted from a path outside the repository did
+not survive cluster recreation, a fragility that had nothing to do
+with CAGE's detection logic and everything to do with where a
+configuration file happened to live. None of these affect whether a
+rule fires correctly. All of them affect whether the system can be
+stood up at all in a given environment, which is a question a
+detection-accuracy number cannot answer on its own.
+
+**A live, multi-hour evaluation needs to survive its own
+interruptions, not just produce correct numbers when it finishes
+cleanly.** An early version of this evaluation's own scripts wrote
+results only once, at completion; a single transient `kubectl` timeout
+partway through an unattended run discarded every trial collected up
+to that point, roughly 35 minutes of data in one case. The fix,
+writing each trial's result to disk immediately rather than buffering
+until the end, cost nothing in the common case and made every
+subsequent crash recoverable rather than fatal. For any evaluation
+that runs unattended against live infrastructure for hours at a time,
+this should be a starting assumption, not a lesson learned partway
+through data collection.
+
+**A system's own health telemetry is evidence of activity, not proof
+of recovery.** CAGE's health endpoint's staleness flag only clears
+when a new event actually arrives, so it cannot, by construction,
+confirm that a component has recovered before something generates
+traffic for it to observe. Building resilience into a system's
+reconnect and retry logic is necessary but does not, by itself,
+demonstrate that the resilience works; only firing a real event
+afterward and confirming it is still detected does that. Any system
+that reports its own health passively should be evaluated by testing
+what it actually does under failure, not by reading what it says about
+itself.
+
+Across both halves of this evaluation, every defect described here was
+found by running the system against live infrastructure and watching
+it behave unexpectedly, not by reading the code that later turned out
+to be wrong. Static analysis and unit tests remain necessary; neither
+would have surfaced a dedup flag that never clears, a matching window
+that silently misattributes false positives, or a health flag that
+cannot prove what it appears to prove. For systems whose correctness
+depends on multi-source event timing, long-lived identity state, and
+cross-process coordination, that gap between code review and live
+behavior is not a minor caveat. It is the reason this evaluation was
+run against a real cluster at all, and it is the strongest argument
+this paper can make for why systems of this kind should be evaluated
+the same way.
 
 ---
 
 ## VIII. Limitations and Threats to Validity
 
-- **Environment scope.** A single-control-plane, two-worker `kind`
-  cluster inside a WSL2 VM is not a production-scale, multi-node,
-  bare-metal Kubernetes topology; detection latency and resource-overhead
-  results may not generalize unchanged to substantially larger or
-  bare-metal deployments, and audit-log access requires apiserver-manifest
-  patching not always available on managed control planes.
-- **CAGE's own runtime credentials.** As documented in §III's trust
-  assumptions, CAGE authenticates against the Kubernetes API using the
-  same local kubeconfig used to administer the cluster, not a
-  purpose-built, minimally-scoped ServiceAccount, even though its
-  actual behavior is read-only by design (no create, patch, or delete
-  calls anywhere in its codebase). This is a real gap between what
-  CAGE needs and what it was granted in this evaluation, not a
-  fundamental architectural constraint; a production deployment should
-  scope it to a dedicated ServiceAccount with get/list/watch
-  permissions on pods and read access to the audit log source, and
-  nothing else.
-- **Kernel/BTF dependency.** T1610 (network lateral movement) requires a
-  BTF-enabled kernel (5.10+); confirmed functional on kernel 6.6,
-  cross-environment portability (e.g., managed offerings with restricted
-  kernel access) not independently verified.
-- **Virtualization-environment generalizability.** All latency/overhead
-  numbers were measured inside a VM; relative findings (the source-latency
-  gap, bounded overhead) likely generalize, but absolute numbers — the
-  ~28s Tetragon plateau specifically — may not transfer unchanged to bare
-  metal, untested here.
-- **T1021 scope.** T1021 carries no scope exclusion at all, flagging
-  every `kubectl exec` including routine administrative access — an
-  accepted, documented precision cost (§IV, VI-A), not an oversight, but
-  one that would need revisiting for a production deployment with a high
-  baseline rate of legitimate `kubectl exec` traffic. The 120-second
-  correlation window similarly bounds how slow a multi-hop attack can be
-  and still be linked into one chain alert.
-- **Synthetic, non-adaptive attack scripts.** Every attack in this
-  evaluation is a fixed, disclosed, non-evasive command sequence.
-  Detection numbers characterize behavior against this specific,
-  published attack set — not robustness against an adversary
-  deliberately trying to evade these exact rules beyond the specific,
-  disclosed threshold boundary measured in §VI-G.
-- **T1499 evasion-boundary precision.** §VI-G's T1499 result uses a
-  comfortably-under-threshold value (15 versus the threshold of 25)
-  rather than an exact threshold-minus-one boundary, for the reason
-  reported in §VII: the exact process-count overhead of the
-  attack-firing mechanism itself proved difficult to pin down reliably
-  in live testing. T1610 and T1613's boundaries are exact.
-- **Limited adversarial evasion testing.** The one real evasion vector
-  found and fixed during development (name-based scope exclusion) was
-  found incidentally, not via systematic red-teaming; other evasion
-  strategies (timing fragmentation across the correlation window, binary
-  renaming) remain untested.
-- **Sample size.** N=10 per condition (detection-quality experiments)
-  narrows the 95% CI to a floor of 72.2% at 10/10, a substantial
-  improvement over pilot N=2-3 data, but a larger N would further
-  tighten intervals, particularly relevant near any future severity- or
-  threshold-boundary claims. This ceiling is resource-bounded rather
-  than arbitrary (§V): each trial requires waiting up to the full
-  detection-window timeout to confirm a non-detection, and this cost
-  multiplies across 11 techniques and both attack and benign conditions
-  into several hours of supervised live-cluster session time at N=10
-  alone. Fault-injection trials (E8) use N=5 reps/scenario for the same
-  practical session-time reason rather than a formal power analysis;
-  confidence intervals are reported throughout specifically so this
-  uncertainty is visible rather than hidden behind point estimates.
-- **Deferred experiments.** An old-code-versus-new-code comparison for
-  the chain-correlation fix (§IV), and a threshold-sweep experiment
-  varying detection thresholds across multiple values rather than only
-  default-versus-boundary, were both explicitly descoped from this
-  evaluation cycle for time. Neither affects the validity of the results
-  that are included; both would add depth to, respectively, §VI-C and
-  §VI-G.
-- **No quantitative baseline.** Table II is qualitative; a head-to-head
-  vanilla-Tetragon comparison (the cheapest quantitative addition,
-  dependent on the E2 ablation infrastructure) remains future work.
-- **Attack-chain timeline figure not yet built.** A planned illustrative
-  figure showing one representative multi-hop chain's timeline
-  (T1021→T1059→T1552, annotated by telemetry source) requires
-  hand-curating real timestamps from a server log rather than being
-  auto-generated from the trial CSVs like the other figures, and was not
-  completed in this evaluation cycle. The plotting script and CSV
-  template exist (`evaluation/person_a/plots/plot_fig1_chain_timeline.py`,
-  a name left over from before the Introduction's visibility-gap diagram
-  claimed the Fig. 1 slot; it would be inserted near §VI-C and numbered
-  accordingly once built, with every subsequent figure shifted by one);
-  populating it with real data from an E1 or E3 run is a short remaining
-  task before final submission.
-- **Tetragon delivery-latency mechanism not conclusively root-caused.**
-  The ~28s plateau (§VI-D) is characterized precisely and highly
-  reproducibly (N=20, σ=0.17s) but its underlying cause within Tetragon's
-  own event-delivery path was not identified within this project's
-  scope; an attempted fix was reverted after live testing showed it
-  traded latency for event loss.
-- **Connection-age dependence is an open question, not resolved.** Two
-  connage sweeps at different scales gave contradictory results, with
-  evidence pointing to a post-restart event-backlog confound in the
-  full-scale run rather than a genuine change in system behavior;
-  neither the original age-dependence hypothesis nor its pilot-scale
-  revision is re-confirmed (§VI-D).
-- **This evaluation's own measurement infrastructure had reproducible
-  failure modes**, caught and fixed during data collection on both
-  sides — see §VII for the full account. Reported transparently as a
-  property of the evaluation environment worth documenting for anyone
-  extending this suite, not retroactively minimized.
+We organize the limitations of this work around four standard
+categories: internal validity, whether the causal explanations we
+offer for observed behavior are actually correct; external validity,
+whether our findings generalize beyond the specific environment we
+tested; construct validity, whether our measurements capture what we
+intend them to; and reliability, whether the evaluation itself can be
+reproduced and trusted.
+
+### A. Internal Validity
+
+The Tetragon delivery-latency plateau (§VI-D) is characterized
+precisely and reproducibly, a standard deviation of 0.17 seconds
+across 20 trials, but its underlying mechanism inside Tetragon's own
+event-delivery path was not conclusively identified within this
+project's scope. An engineering fix based on one candidate
+explanation, periodic subprocess cycling, was implemented, tested
+live, and reverted after it traded latency for measurable event loss.
+The plateau itself is a solid, repeatable finding; the causal
+explanation for why it exists at exactly that duration is not.
+
+Whether this same delay depends on connection age remains genuinely
+unresolved. Two connection-age sweeps at different scales produced
+contradictory results, and the more likely explanation, a post-restart
+event backlog contaminating the full-scale sweep's early trials, is
+supported by log evidence but not confirmed as the sole cause. Neither
+the original age-dependence hypothesis nor its later revision is
+treated as settled. This matters because a reader relying on this
+paper to reason about Tetragon's own internals, rather than about
+CAGE's behavior, should not treat either hypothesis as established.
+
+The T1499 evasion-boundary result (§VI-G) uses a deliberately wider
+sub-threshold margin than the other two threshold-based detectors,
+because live measurement of the attack-firing helper's own
+per-invocation process count proved unreliable across repeated trials.
+The boundary reported for T1499 is real and honestly characterized,
+but it is a comfortably-under-threshold point rather than an exact
+threshold-minus-one measurement, unlike T1610 and T1613.
+
+The spurious-alert pattern observed during fault injection (§VI-H) has
+the same structure as the connection-age question above: a plausible
+explanation supported by circumstantial evidence, not a confirmed
+cause. The attacker pod's background loop firing roughly every 30
+seconds, combined with the audit-truncate and control-plane scenarios'
+longer functional-recovery windows, is consistent with why those two
+scenarios saw more spurious alerts than the shorter Tetragon-kill
+scenario. This evaluation did not isolate that background activity
+with a dedicated no-traffic control run, so fault-induced false
+positives cannot be ruled out with the same certainty as the timing
+correlation suggests; a control run with no background traffic would
+close this gap directly.
+
+### B. External Validity
+
+All experiments ran on a single-control-plane, two-worker `kind`
+cluster inside a WSL2 virtual machine, not a production-scale,
+multi-node, bare-metal deployment. Absolute timing numbers, the
+roughly 28-second Tetragon plateau specifically, may not transfer
+unchanged to bare metal; the relative pattern this paper's argument
+actually depends on, a large and consistent gap between audit-log and
+eBPF-sourced detection latency, is a more robust claim than any single
+absolute number and is the one we ask readers to generalize from.
+Audit-log access itself requires patching the API server's own
+manifest, a step not available on every managed Kubernetes offering,
+which is a deployment constraint independent of anything CAGE's
+detection logic does.
+
+T1610's kprobe-based detection path requires a BTF-enabled kernel.
+This was confirmed functional on kernel 6.6 but was not independently
+verified across managed offerings that restrict kernel access, so its
+portability outside this specific environment remains an open question
+rather than a confirmed capability.
+
+Every attack in this evaluation is a fixed, disclosed, non-adaptive
+command sequence, run exactly as documented. The detection numbers in
+§VI characterize CAGE's behavior against this specific, published
+attack set. They are not a claim about robustness against an adversary
+actively trying to evade these exact rules, beyond the one boundary
+this paper deliberately measures in §VI-G. The single real evasion
+vector found during this project, a name-based scope exclusion that
+would have let an attacker rename a pod to suppress its own detection,
+was found incidentally during development, not through systematic
+red-teaming, and was fixed before any evaluation data was collected on
+it. That it was found by accident rather than by deliberate search
+makes an unknown number of similar vectors plausible, not just the two
+named here; timing fragmentation across the 120-second correlation
+window and binary renaming are the two we can name in advance, not an
+exhaustive list of what remains untested.
+
+This paper's comparison against related systems (Table II) is
+qualitative, built from each system's own published description rather
+than a controlled, head-to-head measurement. The cheapest and
+highest-value quantitative addition, running vanilla Tetragon against
+the same attack set used in §VI-A and §VI-B, remains future work
+rather than a claim this paper makes.
+
+### C. Construct Validity
+
+T1021 carries no scope exclusion at all, by deliberate design (§IV):
+it flags every `kubectl exec`, including routine administrative
+access. This is a disclosed precision cost, not an oversight, but it
+means the 50 percent precision reported for T1021 in Table IV measures
+the rate against this evaluation's specific benign-control workload,
+not against the baseline rate of legitimate `kubectl exec` traffic any
+particular production cluster would actually see. A cluster with
+substantially more or less routine exec activity than our benign
+control would observe a different precision number for this rule
+without any change to CAGE's own logic.
+
+Detection-quality experiments use N=10 trials per condition, which
+narrows the 95 percent Wilson confidence interval to a floor of 72.2
+percent even where every trial succeeded. This is a resource-bounded
+choice, not an arbitrary one: each trial waits up to the full
+detection-window timeout to confirm a non-detection, and this cost
+multiplies across eleven techniques and two conditions into several
+hours of supervised session time at N=10 alone. We report confidence
+intervals throughout specifically so this constraint stays visible to
+the reader rather than being hidden behind point estimates.
+
+### D. Reliability and Reproducibility
+
+Two experiments planned for this evaluation cycle were explicitly
+descoped for time: a direct old-code-versus-new-code comparison
+isolating the chain-correlation dedup fix, and a full multi-value
+threshold sweep rather than only a default-versus-boundary comparison.
+Neither affects the validity of the results actually reported; both
+would add depth to §VI-C and §VI-G respectively, and both are
+concrete, well-scoped items for future work rather than open-ended
+suggestions.
+
+The evaluation infrastructure itself was not free of defects. §VII
+documents several real bugs found only by running this evaluation
+against live infrastructure: a metrics-matching window that could have
+misattributed false positives, a string-matching pattern that could
+have masked real detections, and process-identification bugs that
+corrupted two full-scale systems measurements before being caught and
+fixed. We report this directly rather than treating it as an
+embarrassment to minimize, because it is a property of the evaluation
+environment that anyone extending this work should know about, and
+because catching and correcting it is itself part of what this paper's
+evaluation methodology demonstrates.
+
+Finally, CAGE's own runtime credentials in this evaluation are broader
+than its architecture requires. As §III discloses, CAGE authenticates
+with the same local kubeconfig used to administer the cluster rather
+than a purpose-built, minimally-scoped ServiceAccount, even though its
+actual behavior is read-only by design. This does not affect any
+detection or systems-characteristics finding in this paper, since
+CAGE's own process was never adversarially targeted in this
+evaluation, but it is a real gap between what a production deployment
+should grant and what this evaluation environment happened to grant,
+and we report it as future hardening work rather than leaving it
+undisclosed.
 
 ---
 
