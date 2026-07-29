@@ -70,6 +70,7 @@ def main():
     fig.tight_layout()
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     fig.savefig(OUT, dpi=150)
+    fig.savefig(OUT.replace(".png", ".pdf"), bbox_inches="tight")
     print(f"-> {OUT}")
 
 

@@ -8,3 +8,5 @@ inspect.json
 *.log
 .claude/settings.local.json
 evaluation/person_b/*_COMPLETE
+*.aux
+missfont.log
