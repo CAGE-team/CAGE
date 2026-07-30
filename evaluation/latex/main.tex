@@ -21,13 +21,13 @@
 % Formatting-density pass: tighten caption spacing and float separation
 % (all within normal IEEE-style bounds) to recover pages without cutting
 % any text, table, or figure content.
-\setlength{\abovecaptionskip}{0.35\baselineskip}
-\setlength{\floatsep}{0.6\baselineskip plus 0.15\baselineskip minus 0.15\baselineskip}
-\setlength{\textfloatsep}{1.1\baselineskip plus 0.15\baselineskip minus 0.3\baselineskip}
-\setlength{\intextsep}{0.6\baselineskip plus 0.15\baselineskip minus 0.15\baselineskip}
-\setlength{\dblfloatsep}{0.6\baselineskip plus 0.15\baselineskip minus 0.15\baselineskip}
-\setlength{\dbltextfloatsep}{1.1\baselineskip plus 0.15\baselineskip minus 0.3\baselineskip}
-\renewcommand{\arraystretch}{1.0}
+\setlength{\abovecaptionskip}{0.25\baselineskip}
+\setlength{\floatsep}{0.4\baselineskip plus 0.1\baselineskip minus 0.15\baselineskip}
+\setlength{\textfloatsep}{0.75\baselineskip plus 0.1\baselineskip minus 0.3\baselineskip}
+\setlength{\intextsep}{0.4\baselineskip plus 0.1\baselineskip minus 0.15\baselineskip}
+\setlength{\dblfloatsep}{0.4\baselineskip plus 0.1\baselineskip minus 0.15\baselineskip}
+\setlength{\dbltextfloatsep}{0.75\baselineskip plus 0.1\baselineskip minus 0.3\baselineskip}
+\renewcommand{\arraystretch}{0.95}
 \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
 
@@ -152,42 +152,38 @@ remains the audit log and nothing else. Each of these tools is mature
 and effective within its own telemetry source. None of them looks at
 the other source at all, and none was designed to.
 
-The cost of this single-source design is not simply that some events go
-unseen. It is that many of the events each tool does see are, on their
-own, ambiguous. An operator's routine \texttt{kubectl exec} into a pod to check
-its health is indistinguishable, from the audit log alone, from an
-attacker establishing a remote-execution foothold. An ordinary
-interactive debugging shell looks, from eBPF telemetry alone, exactly
-like a post-exploitation shell. What separates the two is not any
-single event but the sequence: a remote exec, followed shortly by a
-shell, followed by a secret read from inside that shell, attributed the
-whole time to the same workload. That sequence is a materially stronger
-signal than any of its individual parts. A tool that instruments only
-one side of the kernel and control-plane boundary never gets the chance
-to observe it, no matter how carefully its rules are tuned, and even if
-it somehow could see across the boundary, it has no source-independent
-notion of workload identity with which to link the two observations
-together.
+The cost of this single-source design is not just unseen events; it is
+that many events either tool does see are individually ambiguous. A
+routine \texttt{kubectl exec} to check a pod's health is indistinguishable,
+from the audit log alone, from an attacker establishing a
+remote-execution foothold, and an ordinary debugging shell looks, from
+eBPF alone, exactly like a post-exploitation shell. What separates the
+two is the sequence: a remote exec, followed by a shell, followed by a
+secret read from inside that shell, all attributed to the same
+workload, a materially stronger signal than any individual event. A
+tool instrumenting only one side of the kernel/control-plane boundary
+never observes that sequence, no matter how carefully tuned, and even
+if it could see across the boundary, it has no source-independent
+workload identity with which to link the observations together.
 
 This gap has not been closed by prior work, although several projects
 sit close to it. Falco and Tetragon operate exclusively on eBPF
-telemetry and score each event on its own, with no mechanism to tie a
+telemetry, scoring each event independently with no mechanism to tie a
 kernel-side event to a control-plane one. K8NTEXT operates exclusively
-on the audit log; it can reconstruct which control-plane events a given
-action caused, but it has no visibility into what happened inside the
-pod as a result, so it cannot see the shell that a correlated \texttt{kubectl
-exec} spawned. PACED \cite{ref4}, UNICORN \cite{ref5}, and P4Control \cite{ref8} sit in a broader family of
-provenance- and information-flow-based systems that CAGE is
-architecturally closer to, but each targets a narrower or different
-problem: PACED detects only container escape through kernel provenance
-capture, UNICORN is a general-purpose, non-Kubernetes anomaly detector
-built for slow APT campaigns rather than technique-level classification,
-and P4Control enforces information-flow policy at the network layer, a
-prevention problem solved through line-rate enforcement rather than the
-after-the-fact detection and chain correlation this paper addresses. No
-existing system fuses eBPF telemetry with the Kubernetes audit log
-through a stable, workload-level identity key in order to detect and
-correlate a broad MITRE ATT\&CK technique catalog.
+on the audit log: it reconstructs which control-plane events a given
+action caused, but cannot see what happened inside the pod as a
+result, so it misses the shell a correlated \texttt{kubectl exec} spawns. PACED
+\cite{ref4}, UNICORN \cite{ref5}, and P4Control \cite{ref8} form a broader family of
+provenance- and information-flow-based systems CAGE is architecturally
+closer to, but each targets a narrower problem: PACED detects only
+container escape via kernel provenance, UNICORN is a general,
+non-Kubernetes anomaly detector for slow APT campaigns rather than
+technique-level classification, and P4Control enforces
+information-flow policy at the network layer, a prevention mechanism
+rather than the after-the-fact detection and chain correlation this
+paper addresses. No existing system fuses eBPF telemetry with the
+Kubernetes audit log through a stable, workload-level identity key to
+detect and correlate a broad MITRE ATT\&CK technique catalog.
 
 CAGE closes this gap using the Kubernetes pod UID as an explicit
 correlation key across both telemetry sources. Unlike a pod's name or
@@ -311,66 +307,60 @@ ATT\&CK-mapped systems discussed below.
 \subsection{Kernel-Level Runtime Security via eBPF}
 \label{subsec:rw-ebpf}
 
-Falco \cite{ref1}, originally developed by Sysdig and now a CNCF-graduated
-project, monitors kernel syscalls via eBPF or a kernel-module probe and
-evaluates them against a customizable rule set, enriching events with
-container and Kubernetes metadata before forwarding alerts to
-downstream sinks. Cilium Tetragon \cite{ref2} similarly instruments process
-execution and network events through eBPF \texttt{TracingPolicy} objects. A
-more recent addition to this space, eBPF-PATROL \cite{ref11}, intercepts system
-calls and execution context to enforce user-defined policies, targeting
-reverse shells, privilege escalation, and container-escape attempts
-with reported overhead under 2.5\%. All three operate purely at the
-kernel boundary: none ingests the Kubernetes audit log, and none has a
-way to relate a syscall-visible event to the API-level action that may
-have caused it. CAGE uses Tetragon as its eBPF telemetry producer but
-adds the audit-log and correlation layers that none of these tools
-provide on their own.
+Falco \cite{ref1}, originally developed by Sysdig and now CNCF-graduated,
+monitors kernel syscalls via eBPF or a kernel-module probe against a
+customizable rule set, enriching events with container and Kubernetes
+metadata before forwarding alerts downstream. Cilium Tetragon \cite{ref2}
+similarly instruments process execution and network events through
+eBPF \texttt{TracingPolicy} objects. eBPF-PATROL \cite{ref11} intercepts syscalls and
+execution context to enforce user-defined policies against reverse
+shells, privilege escalation, and container escape, with reported
+overhead under 2.5\%. All three operate purely at the kernel boundary:
+none ingests the Kubernetes audit log or relates a syscall-visible
+event to the API-level action that may have caused it. CAGE uses
+Tetragon as its eBPF producer but adds the audit-log and correlation
+layers none of these tools provide.
 
 \subsection{Audit-Log-Based Detection}
 \label{subsec:rw-audit}
 
 K8NTEXT \cite{ref3} (Franzil et al., \emph{Computer Networks}, 2026) addresses a
 related but different problem: Kubernetes audit logs record each API
-call largely independently, so the several secondary events a single
-user action triggers are scattered through the log with little explicit
-linkage. K8NTEXT reconstructs \emph{contexts}, groupings of an actor's
-action with the downstream events it caused, using a combination of
-inference rules and a deep-learning model, reporting over 95\% grouping
-accuracy on operations involving up to 100+ correlated audit entries.
-This is a log-\emph{structuring} system rather than a technique-detection
-system, and it is scoped to the audit log alone; it cannot observe the
-kernel-side half of a chain such as T1021$\to$T1059 (remote exec, visible in
-the audit log, followed by the shell it spawns, visible only via eBPF).
+call largely independently, so the secondary events a single user
+action triggers are scattered through the log with little explicit
+linkage. K8NTEXT reconstructs \emph{contexts}, groupings of an actor's action
+with the downstream events it caused, using inference rules plus a
+deep-learning model, reporting over 95\% grouping accuracy on
+operations involving up to 100+ correlated entries. This is a
+log-\emph{structuring} system, scoped to the audit log alone; it cannot
+observe the kernel-side half of a chain such as T1021$\to$T1059 (remote
+exec, visible in the audit log, followed by the shell it spawns,
+visible only via eBPF).
 
 \subsection{Provenance and Information-Flow-Based Systems}
 \label{subsec:rw-provenance}
 
 PACED \cite{ref4} (Abbas et al., IC2E 2022) targets a narrower, high-severity
-problem: detecting container \emph{escape} specifically, defining what
-constitutes a cross-namespace event and proposing a \texttt{privileged\_flow}
-rule evaluated against a benchmark of real container-escape CVEs,
-reporting near-perfect accuracy with no false negatives. UNICORN \cite{ref5}
-(Han et al., NDSS 2020) is a general, non-Kubernetes-specific
-host-level anomaly detector that incrementally sketches whole-system
-provenance graphs to catch long-running, low-and-slow APT campaigns
-without predefined signatures. KAIROS \cite{ref12} (Cheng et al., IEEE S\&P
-2024) extends this line of work with a graph-neural-network-based
+problem, container \emph{escape}, defining what constitutes a cross-namespace
+event and proposing a \texttt{privileged\_flow} rule evaluated against a
+benchmark of real container-escape CVEs with near-perfect accuracy and
+no false negatives. UNICORN \cite{ref5} (Han et al., NDSS 2020) is a general,
+non-Kubernetes host-level anomaly detector that incrementally sketches
+whole-system provenance graphs to catch long-running, low-and-slow APT
+campaigns without predefined signatures. KAIROS \cite{ref12} (Cheng et al.,
+IEEE S\&P 2024) extends this line of work with a graph-neural-network
 encoder-decoder that learns how a provenance graph evolves over time,
-aiming to detect attacks that cross application boundaries without
-prior knowledge of their signatures while still reconstructing a
-human-readable summary of what happened. Notably, Thomas Pasquier
-co-authors PACED, UNICORN, and KAIROS, so these three systems are part
-of one continuous research thread on provenance-based detection that
-CAGE sits adjacent to rather than inside. P4Control \cite{ref8} (Bajaber et
-al., IEEE S\&P 2024) takes a different approach again, enforcing
-decentralized information-flow-control policy at line rate using
-programmable (P4) network switches combined with a lightweight
-host-side eBPF primitive, a prevention mechanism rather than a
-detection one. None of these four systems is Kubernetes-specific, and
-none performs technique-level MITRE ATT\&CK mapping across a broad
-catalog; CAGE's contribution here is orthogonal to theirs rather than a
-direct improvement on any one of them.
+detecting cross-application attacks without prior signatures while
+reconstructing a human-readable summary; PACED, UNICORN, and KAIROS
+share a co-author (Thomas Pasquier) and form one continuous research
+thread CAGE sits adjacent to rather than inside. P4Control \cite{ref8}
+(Bajaber et al., IEEE S\&P 2024) instead enforces decentralized
+information-flow-control policy at line rate using programmable (P4)
+network switches plus a lightweight host-side eBPF primitive, a
+prevention mechanism rather than a detection one. None of these four
+systems is Kubernetes-specific or performs technique-level MITRE
+ATT\&CK mapping across a broad catalog; CAGE's contribution here is
+orthogonal to theirs rather than a direct improvement on any one.
 
 \subsection{Multi-Stage Attack and Alert Correlation}
 \label{subsec:rw-correlation}
@@ -381,14 +371,14 @@ generates. Wilkens et al. \cite{ref13} synthesize kill chain state machines
 from network alert streams, condensing up to 446,458 raw alerts from
 the CSE-CIC-IDS2018 dataset into roughly 700 human-reviewable attack
 scenario graphs, using network topology and zone directionality to
-infer plausible attack-stage transitions. Their correlation runs over
-general enterprise network alerts rather than Kubernetes-specific
-events, and it discovers open-ended scenario graphs rather than
-matching against a fixed, documented catalog. CAGE's chain correlator
-addresses a structurally similar problem, reducing per-technique alerts
-to a small number of high-confidence chain alerts, but keys correlation
-to a Kubernetes pod UID and evaluates against five specific,
-pre-documented ATT\&CK chains rather than deriving arbitrary scenario
+infer plausible attack-stage transitions, over general enterprise
+network alerts rather than Kubernetes-specific events, discovering
+open-ended scenario graphs rather than matching a fixed catalog. CAGE's
+chain correlator addresses a structurally similar problem, reducing
+per-technique alerts to a small number of high-confidence chain
+alerts, but keys correlation to a Kubernetes pod UID and evaluates
+against five specific, pre-documented ATT\&CK chains rather than
+deriving arbitrary scenario
 graphs from network-layer alerts alone.
 
 \subsection{Positioning of CAGE}
@@ -428,17 +418,9 @@ Vanilla Tetragon & eBPF only (process exec, network, file, capabilities) & None;
 
 This is explicitly a qualitative comparison against each system's own
 published description, not a quantitative benchmark; no other tool was
-run against CAGE's own attack set in this project's cluster. The
-single highest-value quantitative addition identified for a future
-revision is a head-to-head run of vanilla Tetragon (CAGE's own eBPF
-backend, already present in this project's infrastructure) against the
-same attack set used in E1/E2, to produce a directly comparable
-precision/recall/latency baseline. This requires re-running the E1/E2
-attack suite a second time against a plain, non-CAGE Tetragon
-deployment in the same cluster, which was out of scope for this
-evaluation cycle's time budget; we present it here as a concrete,
-low-effort next step rather than as a substitute already covered by the
-qualitative comparison above.
+run against CAGE's own attack set in this project's cluster.
+\S\ref{sec:conclusion} identifies a concrete, low-effort path to a
+direct quantitative comparison as future work.
 
 \section{Threat Model}
 \label{sec:threat-model}
@@ -505,22 +487,21 @@ that boundary sits.
 
 The design problem CAGE addresses is not simply that eBPF and the
 Kubernetes audit log each see half of an attack; it is that fusing them
-requires a join key, and neither identifier available at the surface
-qualifies. Pod name is reusable across restarts and, in an adversarial
-setting, chosen by whoever creates the pod: an earlier version of this
-codebase excluded its own infrastructure by matching a pod-name prefix,
-an exclusion later recognized as a real evasion path, since any
-workload matching the pattern, including an attacker's own pod, went
-completely unwatched. Pod IP is likewise reused as pods churn, and is
-not always resolvable at the exact instant an event is produced, since
-Kubernetes propagates identity through a watch stream that updates on
-its own schedule, independent of eBPF's kernel event stream. CAGE is
-built around a different identifier instead: the pod UID, assigned once
-by the Kubernetes API server, stable for the pod's entire lifetime, and
-not something a workload or an attacker can influence. Every design
-decision in this section follows from committing to that identifier as
-the single correlation key across telemetry sources that would
-otherwise share no vocabulary.
+requires a join key, and neither surface identifier qualifies. Pod
+name is reusable across restarts and, adversarially, chosen by
+whoever creates the pod: an earlier version of this codebase excluded
+its own infrastructure by matching a pod-name prefix, later recognized
+as a real evasion path since any workload matching the pattern,
+including an attacker's own pod, went unwatched. Pod IP is likewise
+reused as pods churn and is not always resolvable at the instant an
+event is produced, since Kubernetes propagates identity through a
+watch stream updating on its own schedule, independent of eBPF's
+kernel event stream. CAGE instead uses the pod UID: assigned once by
+the Kubernetes API server, stable for the pod's lifetime, and not
+influenceable by a workload or attacker. Every design decision in this
+section follows from committing to that identifier as the single
+correlation key across telemetry sources that otherwise share no
+vocabulary.
 
 CAGE runs as a single Python process with several daemon threads
 communicating through one shared, in-process event queue. A pod UID
@@ -536,9 +517,9 @@ a multi-hop chain has fired. It then forwards both raw events and any
 resulting alerts to a Flask server, which exposes a REST API and two
 Server-Sent Events streams to a browser dashboard (Fig.~\ref{fig:architecture}).
 
-\begin{figure*}[!t]
+\begin{figure}[!t]
 \centering
-\includegraphics[width=0.62\textwidth]{fig2_architecture.pdf}
+\includegraphics[width=\columnwidth]{fig2_architecture.pdf}
 \caption{Overall CAGE architecture. The Tetragon consumer, audit-log
 consumer, and network monitor each resolve pod identity against the
 shared pod UID cache and tag every event before placing it on one
@@ -547,18 +528,18 @@ event against the causal graph's per-pod-UID window, and broadcasts
 both raw events and resulting alerts through the Flask server to the
 browser dashboard.}
 \label{fig:architecture}
-\end{figure*}
+\end{figure}
 
-Two consequences follow from this structure. First, the hardest problem
-in the system is not any individual detection rule. It is establishing
-pod identity reliably enough, and fast enough, for two telemetry domains
-that learn about that identity at different speeds; \S\ref{subsec:uid-resolution}
-describes that mechanism directly, since it is where most of the
-engineering effort in this codebase actually went. Second, once identity
-resolution and event normalization are handled, the detection logic
-itself is deliberately simple: bounded state, explicit thresholds, and no
-learned model standing between an event and an alert. \S\ref{subsec:temporal-correlation}
-explains that simplicity as a deliberate trade-off in its own right.
+Two consequences follow from this structure. First, the hardest
+problem is not any individual detection rule but establishing pod
+identity reliably and fast enough for two telemetry domains that learn
+about it at different speeds; \S\ref{subsec:uid-resolution} describes
+that mechanism, where most of this codebase's engineering effort went.
+Second, once identity resolution and event normalization are handled,
+the detection logic itself is deliberately simple: bounded state,
+explicit thresholds, and no learned model between an event and an
+alert, a trade-off \S\ref{subsec:temporal-correlation} explains
+directly.
 
 \subsection{Telemetry Acquisition}
 \label{subsec:telemetry-acquisition}
@@ -567,98 +548,94 @@ CAGE draws on two structurally different telemetry domains and adds a
 third, complementary signal for one specific technique.
 
 The Tetragon consumer runs \texttt{tetra getevents} against Tetragon's DaemonSet
-through a persistent \texttt{kubectl exec} subprocess and reads its JSON event
+through a persistent \texttt{kubectl exec} subprocess, reading its JSON event
 stream line by line. Two custom \texttt{TracingPolicy} resources extend
-Tetragon's default process-execution visibility. One attaches a kprobe to
-\texttt{tcp\_connect} to observe outbound connections at the socket layer. The
-other attaches a kprobe to \texttt{cap\_capable}, filtered to four capability
-values (\texttt{CAP\_SYS\_ADMIN}, \texttt{CAP\_SYS\_PTRACE}, \texttt{CAP\_SYS\_MODULE},
-\texttt{CAP\_SYS\_BOOT}) that are meaningful indicators of privilege escalation or
-container escape rather than ordinary container operation. If the
-subprocess exits or the stream ends, the consumer reconnects after a
-short fixed delay rather than escalating to a supervisor-level restart. A
-missed handful of seconds of kernel telemetry is recoverable in a way
-that a crashed process is not.
+Tetragon's default process-execution visibility: one attaches a kprobe
+to \texttt{tcp\_connect} to observe outbound connections at the socket layer,
+and the other attaches a kprobe to \texttt{cap\_capable}, filtered to four
+capability values (\texttt{CAP\_SYS\_ADMIN}, \texttt{CAP\_SYS\_PTRACE}, \texttt{CAP\_SYS\_MODULE},
+\texttt{CAP\_SYS\_BOOT}) that indicate privilege escalation or container escape
+rather than ordinary operation. If the subprocess exits or the stream
+ends, the consumer reconnects after a short fixed delay rather than
+escalating to a supervisor-level restart, since a missed handful of
+seconds of kernel telemetry is recoverable in a way a crashed process
+is not.
 
-The audit log consumer tails the API server's audit log file inside the
-control-plane container, using \texttt{tail -F --retry} rather than the more
-common \texttt{-f}. Kubernetes rotates the audit log in place once it reaches a
-configured size. \texttt{-f} follows a file descriptor that a rotation
-invalidates, silently orphaning the reader; \texttt{-F} reopens the path by
-name instead, so it survives the rotation. Each line is a structured
-audit record. The consumer only acts on records whose \texttt{stage} is
-\texttt{ResponseComplete}; earlier stages describe a request that has not yet
-been authorized or completed, and treating one as an alert-worthy event
-would let a denied request masquerade as a successful one.
+The audit log consumer tails the API server's audit log file inside
+the control-plane container using \texttt{tail -F --retry} rather than the more
+common \texttt{-f}, since Kubernetes rotates the log in place once it reaches
+a configured size: \texttt{-f} follows a file descriptor that rotation
+invalidates, silently orphaning the reader, while \texttt{-F} reopens the path
+by name and survives it. The consumer only acts on records whose
+\texttt{stage} is \texttt{ResponseComplete}; earlier stages describe a request not yet
+authorized or completed, and treating one as alert-worthy would let a
+denied request masquerade as a successful one.
 
 A third source, the network monitor, addresses a limitation of relying
 on the \texttt{tcp\_connect} kprobe alone for lateral-movement detection: kprobe
-coverage depends on a BTF-enabled kernel, a constraint documented in
-\S\ref{sec:limitations} that does not hold across every deployment environment. The
-network monitor is an independent, poll-based fallback that periodically
-executes \texttt{cat /proc/net/tcp} inside every monitored pod through \texttt{kubectl
-exec} and parses established connections directly from procfs. It does
-not require any kernel-level instrumentation at all, which makes it a
+coverage depends on a BTF-enabled kernel, a constraint
+(\S\ref{sec:limitations}) that does not hold across every deployment.
+The network monitor is an independent, poll-based fallback that
+periodically executes \texttt{cat /proc/net/tcp} inside every monitored pod
+through \texttt{kubectl exec} and parses established connections directly from
+procfs, requiring no kernel-level instrumentation, which makes it a
 genuinely complementary signal for the same technique (T1610) rather
 than a duplicate of the kprobe path. Because polling is not free,
-monitoring every pod sequentially would make the wall-clock time of one
-full sweep grow with the number of monitored pods. Once that time
-exceeds the detection rule's own burst window, a genuine
-multi-destination scan can be split across two sweeps, never
-accumulating enough distinct destinations in one window to cross the
-detection threshold. This behavior surfaced during development rather
-than being anticipated up front. The fix polls all monitored pods
-concurrently through a thread pool sized to the pod count, bounding
-sweep time by the slowest single \texttt{kubectl exec} call rather than their
-sum. \S\ref{subsec:rq7} reports on the scalability of this design directly.
+monitoring every pod sequentially made sweep time grow with pod count;
+once that time exceeded the detection rule's own burst window, a
+genuine multi-destination scan could split across two sweeps and never
+accumulate enough distinct destinations in one window to cross the
+threshold, a defect surfaced during development rather than
+anticipated up front. The fix polls all monitored pods concurrently
+through a thread pool sized to the pod count, bounding sweep time by
+the slowest single \texttt{kubectl exec} call rather than their sum;
+\S\ref{subsec:rq7} reports on this design's scalability directly.
 
 \subsection{Pod UID Identity Resolution}
 \label{subsec:uid-resolution}
 
-Resolving a pod UID from the audit log is comparatively direct. Certain
-audit record types, in particular a Secret access performed from inside
-a pod using that pod's mounted service account token, carry pod name and
-pod UID as structured fields under the request's \texttt{user.extra} metadata.
-The API server places these fields there itself; CAGE does not have to
-infer them. Resolving a pod UID from an eBPF event is not direct at all,
-and this is the part of the system where the identity race described in
-\S\ref{subsec:design-overview} actually has to be handled.
+Resolving a pod UID from the audit log is comparatively direct: certain
+record types, in particular a Secret access performed from inside a
+pod using its mounted service account token, carry pod name and UID as
+structured fields under the request's \texttt{user.extra} metadata, placed
+there by the API server itself rather than inferred by CAGE. Resolving
+a pod UID from an eBPF event is not direct at all, and this is where
+the identity race described in \S\ref{subsec:design-overview} actually
+has to be handled.
 
 The pod UID cache is populated by a long-running Kubernetes watch over
-all pods across all namespaces. It is thread-safe and indexed three
-ways: by \texttt{(namespace, name)}, by pod IP, and by \texttt{(namespace, service
-account)}. The watch reconnects with exponential backoff on failure.
-Once failures cross a small consecutive-failure threshold, the cache
-exposes a \texttt{degraded} flag, letting a caller distinguish ``no recent
-activity'' from ``identity resolution is not currently trustworthy.'' This
-flag is informational. It does not gate detection; \S\ref{subsec:alert-dashboard}
-discusses that separation of concerns further.
+all pods across all namespaces, thread-safe and indexed three ways: by
+\texttt{(namespace, name)}, by pod IP, and by \texttt{(namespace, service account)}.
+The watch reconnects with exponential backoff on failure; once
+failures cross a small consecutive-failure threshold, the cache
+exposes a \texttt{degraded} flag distinguishing ``no recent activity'' from
+``identity resolution is not currently trustworthy.'' This flag is
+informational and does not gate detection, a separation of concerns
+\S\ref{subsec:alert-dashboard} discusses further.
 
 Tetragon events do not always carry a usable pod reference directly.
 When they do, resolution is immediate via the event's own \texttt{pod.uid}
 field; when they do not, and Tetragon reports only a raw container
-identifier, CAGE falls back to a container-ID map instead, built once
-at startup and refreshed every three seconds from the Kubernetes API's
-own container status records, matched against the prefix lengths
-Tetragon itself uses for that identifier. The three-second cadence
-balances two costs: refreshing on every event would mean querying the
-Kubernetes API once per exec, which does not scale with event volume,
-while a much longer interval would leave short-lived containers
-unresolvable for most of their existence. To close that gap further,
-the consumer also learns container-ID associations directly from
-\texttt{runc} invocations in the same event stream, extracting the full
-identifier from the invocation's own arguments and caching the
-association immediately, without waiting for the next periodic refresh.
+identifier, CAGE falls back to a container-ID map built once at
+startup and refreshed every three seconds from the Kubernetes API's
+own container status records, matched against Tetragon's own prefix
+lengths for that identifier. The three-second cadence balances two
+costs: refreshing per event would query the API once per exec, which
+does not scale with event volume, while a much longer interval would
+leave short-lived containers unresolvable for most of their existence.
+The consumer also learns container-ID associations directly from
+\texttt{runc} invocations in the same event stream, extracting the identifier
+from the invocation's arguments and caching it immediately rather than
+waiting for the next periodic refresh.
 
 Even with both mechanisms running, a process can execute and be
-reported by eBPF before either has had a chance to resolve its
-container. Rather than silently dropping these events or blocking the
-consumer thread until resolution succeeds, CAGE places any event that
-plausibly references a container in a small retry buffer, re-attempted
-every 300 milliseconds for up to two seconds; anything still unresolved
-after that window is dropped and logged explicitly, since an event
-genuinely un-attributable to any live pod after two seconds is unlikely
-to become attributable later (Fig.~\ref{fig:uid-resolution}).
+reported by eBPF before either resolves its container. Rather than
+dropping these events silently or blocking the consumer thread, CAGE
+places any plausibly container-referencing event in a small retry
+buffer, re-attempted every 300 milliseconds for up to two seconds;
+anything still unresolved after that window is dropped and logged
+explicitly, since an event un-attributable after two seconds is
+unlikely to become attributable later (Fig.~\ref{fig:uid-resolution}).
 
 \begin{figure}[!t]
 \centering
@@ -672,16 +649,15 @@ milliseconds for up to two seconds before dropping the event.}
 \label{fig:uid-resolution}
 \end{figure}
 
-Every event tagging function additionally discards events whose resolved
-namespace falls in a small set of cluster-infrastructure namespaces,
-before the event is queued at all rather than only inside each detection
-rule. This ordering matters for reasons beyond correctness. A live
-measurement on an otherwise idle cluster found that cluster-infrastructure
+Every event tagging function additionally discards events whose
+resolved namespace falls in a small set of cluster-infrastructure
+namespaces before the event is queued at all, rather than only inside
+each detection rule, a distinction that matters beyond correctness: a
+live measurement on an otherwise idle cluster found cluster-infrastructure
 activity, chiefly \texttt{kube-proxy}'s continual iptables resynchronization,
-accounted for 77\% of total eBPF event volume. Letting all of it reach
-the queue, only to be discarded by every detection rule downstream,
-would waste processing time on events that can never produce an alert
-either way.
+accounted for 77\% of total eBPF event volume, and letting all of it
+reach the queue only to be discarded downstream would waste processing
+time on events that can never produce an alert either way.
 
 \subsection{Event Normalization}
 \label{subsec:event-normalization}
@@ -706,27 +682,26 @@ observability.
 \subsection{Temporal Correlation and the Causal Graph}
 \label{subsec:temporal-correlation}
 
-The correlation engine is deliberately simple relative to what its name
-suggests, and it is worth being precise about that rather than letting
-the name imply more than the implementation does. \texttt{CausalGraph}
-maintains a \texttt{networkx} directed graph whose nodes are pod identities,
-added as events arrive. It does not currently populate edges on that
-graph; the graph the dashboard renders is synthesized independently, as
-described in \S\ref{subsec:alert-dashboard}. The mechanism that actually decides whether a
-technique or a multi-hop chain has fired is a bounded, per-pod-UID
+The correlation engine is deliberately simpler than its name suggests.
+\texttt{CausalGraph} maintains a \texttt{networkx} directed graph whose nodes are pod
+identities, added as events arrive, but does not currently populate
+edges; the graph the dashboard renders is synthesized independently
+(\S\ref{subsec:alert-dashboard}). What actually decides whether a
+technique or multi-hop chain has fired is a bounded, per-pod-UID
 sliding window of recent normalized events, held for 120 seconds and
-pruned against each new event's own timestamp. Individual technique
-rules test this window, or the incoming event alone, against explicit
-conditions. Examples include a shell binary observed inside a pod, a
-burst of connections to five or more distinct destination pods within
-ten seconds, twenty-five or more process executions from one pod within
-ten seconds, and ten or more reads of RBAC objects by one identity
-within thirty seconds; the remaining techniques in Table~\ref{tab:techniques} follow the
-same pattern. Chain detection reuses the same window rather than running
-a separate pass. A chain such as remote-exec-then-shell-then-secret-access
-is checked by testing whether the relevant event types or binaries
-co-occur within the same 120-second window for the same pod UID, not by
-traversing a persisted graph structure.
+pruned against each new event's timestamp. Individual technique rules
+test this window, or the incoming event alone, against explicit
+conditions: a shell binary observed inside a pod, a burst of
+connections to five or more distinct destination pods within ten
+seconds, twenty-five or more process executions from one pod within
+ten seconds, ten or more reads of RBAC objects by one identity within
+thirty seconds; the remaining techniques in Table~\ref{tab:techniques}
+follow the same pattern. Chain detection reuses the same window rather
+than running a separate pass: a chain such as
+remote-exec-then-shell-then-secret-access is checked by testing
+whether the relevant event types or binaries co-occur within the same
+120-second window for the same pod UID, not by traversing a persisted
+graph structure.
 
 This design is a deliberate trade-off: a learned, graph-based approach,
 of the kind KAIROS \cite{ref12} and UNICORN \cite{ref5} take at the
@@ -739,34 +714,32 @@ threshold, measured directly by the evasion-boundary evaluation in
 \S\ref{subsec:rq4}, and keeps resource cost flat under load rather than
 scaling with a model's inference cost, as reported in \S\ref{subsec:rq6}.
 
-A pod UID is a long-lived identifier that can be reused across many
-separate, unrelated incidents over a pod's lifetime; nothing in
-Kubernetes destroys a pod merely because it triggered an alert. This has
-a direct consequence for how chain state must be managed. A chain or
-burst condition that, once satisfied, is marked as fired permanently for
-that pod UID would silently prevent any later, genuinely independent
-incident on the same long-lived workload from ever being reported again.
-CAGE's chain and burst detectors are instead episode-scoped. A firing key
-is retained only while its underlying condition remains continuously
-satisfied, and is discarded the moment that condition goes false. A
-later, separate episode on the same identity can then fire the same rule
-again. This is not a hypothetical concern. An earlier version of the
-fork-bomb detector (T1499) added its firing key once and never removed
-it, so a pod that triggered it once could never trigger it again for the
-rest of its lifetime. This defect was found and fixed during this
-project's own evaluation effort. The fix was verified live, by firing
-two independent bursts against the same long-lived pod and confirming
-both were reported. \S\ref{sec:lessons} discusses this and several related
-defects found the same way, by running the system rather than only
-reading it.
+A pod UID is a long-lived identifier reusable across many separate,
+unrelated incidents over a pod's lifetime; nothing in Kubernetes
+destroys a pod merely because it triggered an alert, which has a
+direct consequence for how chain state must be managed. A chain or
+burst condition marked as fired permanently for that pod UID would
+silently prevent any later, genuinely independent incident on the same
+workload from ever being reported again, so CAGE's chain and burst
+detectors are instead episode-scoped: a firing key is retained only
+while its underlying condition remains continuously satisfied and is
+discarded the moment it goes false, letting a later, separate episode
+on the same identity fire the same rule again. An earlier version of
+the fork-bomb detector (T1499) added its firing key once and never
+removed it, so a pod that triggered it once could never trigger it
+again; this defect was found during this project's own evaluation
+effort and verified fixed live, by firing two independent bursts
+against the same long-lived pod and confirming both were reported.
+\S\ref{sec:lessons} discusses this and several related defects found the
+same way, by running the system rather than only reading it.
 
-The per-pod-UID state described above accumulates for every pod that has
-ever produced an event, and pods in a real deployment churn continuously.
-CAGE therefore periodically sweeps and discards tracking state for any
-pod UID with no activity in the last 120 seconds, the same duration as
-the correlation window itself. This runs on an event-count cadence
-rather than a wall-clock timer, avoiding a dedicated background thread
-purely for garbage collection.
+The per-pod-UID state above accumulates for every pod that has ever
+produced an event, and pods in a real deployment churn continuously,
+so CAGE periodically sweeps and discards tracking state for any pod
+UID with no activity in the last 120 seconds, the same duration as the
+correlation window itself, on an event-count cadence rather than a
+wall-clock timer, avoiding a dedicated background thread purely for
+garbage collection.
 
 \subsection{Attack Detection Pipeline and MITRE ATT\&CK Mapping}
 \label{subsec:detection-pipeline}
@@ -778,16 +751,16 @@ Table~\ref{tab:techniques} lists the eleven MITRE ATT\&CK techniques CAGE curren
 to a rule, the severity assigned to each, and the telemetry source
 that produces it.
 
-\begin{figure*}[!t]
+\begin{figure}[!t]
 \centering
-\includegraphics[width=0.46\textwidth]{fig4_detection_pipeline.pdf}
+\includegraphics[width=0.9\columnwidth]{fig4_detection_pipeline.pdf}
 \caption{The detection pipeline every normalized event passes
 through. Technique checks run independently of one another; in
 parallel, the shared per-pod-UID window feeds the five documented
 chain checks. Both paths produce an output that updates the causal
 graph and the live dashboard.}
 \label{fig:detection-pipeline}
-\end{figure*}
+\end{figure}
 
 \begin{table}[!t]
 \centering
@@ -826,63 +799,63 @@ chain alert is strictly stronger evidence than any of its constituent
 per-technique alerts on their own, since it requires several independent
 detectors to agree on the same identity within a bounded time.
 
-One rule is a deliberate, disclosed exception to an otherwise consistent
-scope-exclusion policy. T1021 (\texttt{kubectl exec}) carries no namespace
-exclusion at all, and fires on any remote exec into any pod, including
-routine administrative access into cluster-infrastructure components.
-This precision cost is accepted deliberately. Excluding infrastructure
-namespaces from this specific rule would also exclude a real attacker's
-remote-exec session into a compromised infrastructure pod, exactly the
-access this rule is meant to catch. Every other behavioral rule excludes
-cluster-infrastructure namespaces explicitly, by namespace rather than by
-pod name, for the same evasion-resistance reason given in \S\ref{subsec:design-overview}.
+One rule is a deliberate, disclosed exception to an otherwise
+consistent scope-exclusion policy: T1021 (\texttt{kubectl exec}) carries no
+namespace exclusion at all, firing on any remote exec into any pod,
+including routine administrative access into cluster-infrastructure
+components. This precision cost is accepted deliberately, since
+excluding infrastructure namespaces from this rule would also exclude
+a real attacker's remote-exec session into a compromised
+infrastructure pod, exactly the access it is meant to catch. Every
+other behavioral rule excludes cluster-infrastructure namespaces
+explicitly, by namespace rather than by pod name, for the same
+evasion-resistance reason given in \S\ref{subsec:design-overview}.
 
 \subsection{Alert Generation and Dashboard Integration}
 \label{subsec:alert-dashboard}
 
-Detection and visualization share the same event stream by construction,
-not by two independent systems agreeing to stay in sync. A single loop
-dequeues each normalized event once and evaluates it against the causal
-graph. From that same event, and the same resulting alerts, it both
-updates internal state and pushes to two independent sets of
-Server-Sent Events subscribers, one for raw events and one for alerts,
-over a REST API served by the same process. This matters for what the
-dashboard can be trusted to show. The visualization layer consumes
-exactly the events the detector consumed, and nothing else, so what an
-operator sees on the live graph is never a best-effort approximation of
-what was evaluated. The graph itself is exposed through a \texttt{/api/graph}
-endpoint. Rather than being read back from a persisted graph structure
-inside the correlator, it is reconstructed on each request directly from
-the current pod cache and the accumulated alert list. Each pod node is
-colored by its highest observed alert severity, and each alert type
-synthesizes its own kind of edge: a self-loop for an in-pod behavior such
-as a shell spawn or a privilege escalation attempt, a directed edge to a
-synthetic external node for a remote-exec session, or an edge between two
-real pod nodes for a lateral network connection. The browser dashboard
-renders this as an interactive canvas graph, alongside a MITRE technique
-reference panel, a kill-chain \cite{ref18} step indicator for correlated
-alerts, and a per-source health view.
+Detection and visualization share the same event stream by
+construction, not by two independent systems agreeing to stay in
+sync: a single loop dequeues each normalized event once, evaluates it
+against the causal graph, updates internal state, and pushes that
+same event and any resulting alerts to two independent Server-Sent
+Events subscriber sets, one for raw events and one for alerts, over a
+REST API served by the same process. This matters for what the
+dashboard can be trusted to show: the visualization layer consumes
+exactly the events the detector consumed, so what an operator sees is
+never a best-effort approximation of what was evaluated. The graph
+itself, exposed through a \texttt{/api/graph} endpoint, is reconstructed on
+each request directly from the current pod cache and accumulated
+alert list rather than read back from a persisted structure inside
+the correlator. Each pod node is colored by its highest observed alert
+severity, and each alert type synthesizes its own edge: a self-loop
+for an in-pod behavior such as a shell spawn or privilege escalation
+attempt, a directed edge to a synthetic external node for a
+remote-exec session, or an edge between two real pod nodes for a
+lateral connection. The browser dashboard renders this as an
+interactive canvas graph, alongside a MITRE technique reference panel,
+a kill-chain \cite{ref18} step indicator for correlated alerts, and a
+per-source health view.
 
-That health view is deliberately kept separate from the detection path.
-A \texttt{/api/health} endpoint reports, for each telemetry source, whether its
-consumer is enabled for the current configuration, whether its
-subprocess is still alive, and how long it has been since that source
-last produced an event. A source is flagged as stale once that silence
-passes a fixed threshold. None of this bookkeeping influences whether an
-event is processed or an alert fires. Its only purpose is to make
-degraded telemetry health observable rather than silently masked, a
-property the fault-injection evaluation in \S\ref{subsec:rq8} exercises
-directly. The same separation applies to the UID cache's own \texttt{degraded}
-flag from \S\ref{subsec:uid-resolution}, which reports on resolution health without ever
-gating whether an already-resolved event is processed.
+That health view is deliberately kept separate from the detection
+path. A \texttt{/api/health} endpoint reports, for each telemetry source,
+whether its consumer is enabled, whether its subprocess is still
+alive, and how long since it last produced an event, flagging a
+source as stale once that silence passes a fixed threshold; none of
+this bookkeeping influences whether an event is processed or an alert
+fires. Its only purpose is making degraded telemetry health observable
+rather than silently masked, a property the fault-injection evaluation
+in \S\ref{subsec:rq8} exercises directly. The same separation applies to the
+UID cache's own \texttt{degraded} flag from \S\ref{subsec:uid-resolution}, which reports on
+resolution health without ever gating whether an already-resolved
+event is processed.
 
 Finally, CAGE supports running with any one telemetry source disabled
-(\texttt{tetragon\_only}, \texttt{audit\_only}, or the default \texttt{fused} configuration
-with all sources active), controlled by a single environment variable
-read at startup. This configurability exists for one reason: it lets the
-ablation study in \S\ref{subsec:rq2} measure, directly rather than by argument,
-what each telemetry source individually contributes and what fusing them
-recovers.
+(\texttt{tetragon\_only}, \texttt{audit\_only}, or the default \texttt{fused} configuration),
+controlled by a single environment variable read at startup, so the
+ablation study in \S\ref{subsec:rq2} can measure directly, rather than by
+argument, what each source individually contributes and what fusing
+them recovers.
 
 \section{Evaluation Methodology}
 \label{sec:eval-methodology}
@@ -946,20 +919,19 @@ rates that occur throughout this evaluation and misrepresents the true
 uncertainty at these sample sizes. For $x$ successes in $n$ trials, with
 $\hat{p} = x/n$ and $z = 1.96$:
 \begin{equation}
-\mathrm{CI} = \frac{\hat{p} + \dfrac{z^2}{2n} \pm z\sqrt{\dfrac{\hat{p}(1-\hat{p})}{n} + \dfrac{z^2}{4n^2}}}{1 + \dfrac{z^2}{n}}
+\mathrm{CI} = \frac{\hat{p} + \frac{z^2}{2n} \pm z\sqrt{\frac{\hat{p}(1-\hat{p})}{n} + \frac{z^2}{4n^2}}}{1 + \frac{z^2}{n}}
 \label{eq:wilson}
 \end{equation}
 Detection-quality experiments use N=10 trials per condition; fault-injection trials (E8) use N=5
 repetitions per scenario. Both sample sizes were set by the practical
 constraints of a live-cluster, human-supervised evaluation rather than
-a formal power analysis: each trial requires waiting up to the full
-detection-window timeout before a non-detection can be confirmed, and
-this cost multiplies across 11 techniques and both attack and benign
-conditions into several hours of supervised session time at N=10
-alone. The resulting confidence intervals (a floor of 72.2\% at 10/10,
-discussed further in \S\ref{sec:limitations}) are reported specifically so that
-constraint is visible to the reader rather than hidden behind point
-estimates. Continuous measurements (E4 latency, E5 CPU and
+a formal power analysis: each trial waits up to the full
+detection-window timeout before a non-detection can be confirmed,
+multiplying across 11 techniques and both conditions into several
+hours of session time at N=10 alone. The resulting confidence
+intervals (a floor of 72.2\% at 10/10, \S\ref{sec:limitations}) are
+reported so that constraint stays visible to the reader rather than
+hidden behind point estimates. Continuous measurements (E4 latency, E5 CPU and
 memory, E6 cycle time) are reported as the mean with a 95\% confidence
 interval computed from the t-distribution (df = N-1), alongside the
 median, standard deviation, 95th percentile, and minimum/maximum for
@@ -969,24 +941,20 @@ distributional shape.
 benign near-miss. Creating a privileged pod, granting cluster-admin,
 and issuing an RBAC-discovery burst are inherently suspicious \emph{at the
 API level}; there is no legitimate version of ``create a privileged
-pod'' that looks different from the audit log's point of view. For
-T1496, T1613, T1548-PRIV-POD, and T1548.005 we report recall only. A
-contrived benign control for these would test nothing real, and we say
-so explicitly rather than omit the caveat.
+pod'' that looks different from the audit log's point of view, so for
+T1496, T1613, T1548-PRIV-POD, and T1548.005 we report recall only: a
+contrived benign control for these would test nothing real.
 
-\textbf{Reproducibility.} Detection-quality scripts live under
-\url{evaluation/person_a/scripts/}; systems-characteristics scripts live
-under \url{evaluation/person_b/scripts/}. Both take explicit command-line
-flags for scale (trial counts, phase durations, repetition count) and
-write timestamped raw CSVs that are never overwritten silently.
-Pilot-scale runs were archived before each full-scale re-run began, so
-both scales' raw data remain available for inspection.
+\textbf{Reproducibility.} Both halves' scripts take explicit
+command-line flags for scale (trial counts, phase durations,
+repetition count) and write timestamped raw CSVs that are never
+overwritten silently, with pilot-scale runs archived separately from
+full-scale ones for direct comparison.
 \url{evaluation/person_b/scripts/run_full_scale_all.sh} reproduces the
 full-scale systems-characteristics run end to end, including automatic
-environment-recovery retries if any stage's server connection drops
-mid-run. The detection-quality scripts' exact run order and commands
-are documented in \url{evaluation/person_a/README.md}. A complete artifact
-inventory is given in the Appendix.
+environment-recovery retries if a stage's server connection drops
+mid-run. Script locations, exact run order, and a complete artifact
+inventory are given in the Appendix (\S\ref{app:reproducibility}).
 
 \section{Results}
 \label{sec:results}
@@ -1044,60 +1012,56 @@ Precision divides the technique set exactly along the design boundary
 stated in \S\ref{sec:system-design}. The four techniques with no scope
 exclusion (T1059, T1021, T1548, T1611) show precisely 50\% precision,
 since each fires on the matched benign action for the same reason it
-fires on the attack: a shell spawned by a legitimate debugging session
-looks identical, at the eBPF layer, to one spawned by an attacker, and
-a capability check triggered by routine container operation looks
-identical to one triggered during privilege escalation or an escape
-attempt. A partial or uneven split would have suggested the benign
-control was not a genuine closest lookalike; the exact 50/50 result
-confirms the control was constructed correctly rather than exposing an
-unexpected weakness. The three techniques with real behavioral
-discrimination (T1552, T1610, T1499) show 100\% precision, since their
-detection logic tests for something a legitimate action of the same
-kind does not produce: a secret read through a compromised service
-account token, a burst of connections to several distinct
-destinations, a burst of process executions well above routine
-container activity.
+fires on the attack: a shell spawned during legitimate debugging looks
+identical, at the eBPF layer, to one spawned by an attacker, and a
+capability check from routine container operation looks identical to
+one from privilege escalation or an escape attempt; the exact 50/50
+split confirms the benign control was a genuine closest lookalike
+rather than exposing an unexpected weakness. The three techniques with
+real behavioral discrimination (T1552, T1610, T1499) show 100\%
+precision, since their detection logic tests for something a
+legitimate action of the same kind does not produce: a secret read
+through a compromised service account token, a burst of connections to
+several distinct destinations, a burst of process executions well
+above routine activity.
 
 This split is a deliberate, disclosed design choice: CAGE favors
-recall over precision for the four techniques where no reliable
-discriminator exists, since a missed detection in this threat model,
-an attacker who already has code execution inside a pod, is more
-costly than an alert an operator has to triage and dismiss. These four
-rules will therefore generate a false positive on every legitimate
-action of the same shape they are built to catch, at whatever rate
-that activity occurs; \S\ref{sec:threat-model} already commits to this
-trade-off explicitly for T1021, and Table~\ref{tab:per-technique}
-confirms it holds, in the same form, for T1059, T1548, and T1611.
+recall over precision for the four techniques with no reliable
+discriminator, since a missed detection, an attacker already executing
+code inside a pod, is costlier than an alert an operator triages and
+dismisses. These four rules will therefore false-positive on every
+legitimate action of the same shape they catch, at whatever rate that
+activity occurs; \S\ref{sec:threat-model} already commits to this
+trade-off for T1021, and Table~\ref{tab:per-technique} confirms it
+holds, in the same form, for T1059, T1548, and T1611.
 
 Detection latency for these trials falls into three clusters rather
-than a single split by source. Audit-log-sourced detections and the
+than a single split by source: audit-log-sourced detections and the
 Tetragon capability check (T1611) resolve fastest, in 0--4.6 seconds;
 T1610 resolves in a distinct middle range, 23.1--23.5 seconds; and the
-remaining Tetragon-sourced techniques that detect via process
-execution (T1059, T1548, T1499, T1496) resolve in 28.5--29.9 seconds,
-matching the 27.96-second mean (95\% CI [27.88, 28.04]) that \S\ref{subsec:rq5} characterizes precisely using T1059 alone at larger scale (N=20); the
-wider spread here reflects four techniques at N=10 each rather than
-one technique at N=20. That the same plateau appears in a correctness
-experiment never designed to measure latency is a useful cross-check
-that the pattern is a property of the underlying telemetry pipeline,
-not an artifact of \S\ref{subsec:rq5}'s own methodology.
+remaining Tetragon-sourced process-execution techniques (T1059, T1548,
+T1499, T1496) resolve in 28.5--29.9 seconds, matching the 27.96-second
+mean (95\% CI [27.88, 28.04]) that \S\ref{subsec:rq5} characterizes using T1059
+alone at larger scale (N=20), the wider spread here reflecting four
+techniques at N=10 each rather than one at N=20. That the same plateau
+appears in a correctness experiment never designed to measure latency
+is a useful cross-check that the pattern reflects the underlying
+telemetry pipeline, not \S\ref{subsec:rq5}'s own methodology.
 
-T1611's speed relative to the other Tetragon-sourced techniques is
-worth flagging rather than treating as an unremarked exception. It
-detects through a different underlying kernel probe, a capability
-check rather than a process-execution event, so its fast resolution is
-consistent with, though not confirmed to be caused by, the
-connection-age and event-buffering behavior that \S\ref{subsec:rq5} reports as an
-open question rather than a settled explanation; process-execution
-events are far more numerous on this cluster than capability-check
-events, and a lower-volume event type would be less exposed to
-whatever queuing effect produces the plateau for the busier one.
-T1610's own middle position, faster than the plateau but slower than
-an audit-log detection, is consistent with its dual telemetry path
-(\S\ref{sec:system-design}): both the Tetragon kprobe and the independent NetworkMonitor
-poll feed the same burst-tracking window, and the alert reflects
-whichever source's event completes the threshold first.
+T1611's speed relative to the other Tetragon-sourced techniques
+deserves a note: it detects through a different kernel probe, a
+capability check rather than a process-execution event, so its fast
+resolution is consistent with, though not confirmed to be caused by,
+the connection-age and event-buffering behavior \S\ref{subsec:rq5} reports as
+an open question; process-execution events are far more numerous on
+this cluster than capability-check events, and a lower-volume event
+type would be less exposed to whatever queuing effect produces the
+plateau for the busier one. T1610's middle position, faster than the
+plateau but slower than an audit-log detection, is consistent with its
+dual telemetry path (\S\ref{sec:system-design}): both the Tetragon kprobe and the
+independent NetworkMonitor poll feed the same burst-tracking window,
+and the alert reflects whichever source completes the threshold
+first.
 
 \subsection{RQ2: Cross-Layer Necessity: Telemetry-Source Ablation (E2)}
 \label{subsec:rq2}
@@ -1156,18 +1120,14 @@ envelopes across every tactic.}
 \end{figure}
 
 The cleanness of this split, exactly 0\% or exactly 100\%, never a
-partial or degraded rate in between, is worth explaining rather than
-only reporting. It confirms that each technique's detection logic is
-implemented entirely on one side of the eBPF/audit-log boundary, with
-no rule that partially depends on both sources to fire; the
-correlation that spans both sources happens only at the chain level
-(\S\ref{subsec:rq3}), never inside a single technique's own detection
-condition. Had any technique shown a partial detection rate under
-ablation, that would have indicated an unintended cross-source
-dependency inside what was assumed to be a single-source rule, a
-design defect rather than the expected result; the absence of any such
-case is itself a form of validation for the architecture described in
-\S\ref{sec:system-design}.
+partial or degraded rate in between, confirms that each technique's
+detection logic is implemented entirely on one side of the
+eBPF/audit-log boundary, with no rule that partially depends on both
+sources to fire; the correlation that spans both sources happens only
+at the chain level (\S\ref{subsec:rq3}). A partial rate under ablation
+would have signaled an unintended cross-source dependency inside what
+was assumed to be a single-source rule; its absence validates the
+architecture described in \S\ref{sec:system-design}.
 
 No technique requires \emph{both} sources simultaneously, but no
 \emph{single} source covers more than 6 of the 11, so an operator
@@ -1285,20 +1245,21 @@ distributions as CDFs, which makes the split between sources visible at
 a glance rather than requiring the reader to compare two rows of a
 table.
 
-\begin{table*}[!t]
+\begin{table}[!t]
 \centering
 \caption{Detection Latency by Technique and Telemetry Source.}
 \label{tab:latency}
 \tablebodyfont
+\setlength{\tabcolsep}{2.5pt}
 \begin{tabular}{@{}llcccccc@{}}
 \toprule
-\textbf{Technique} & \textbf{Source} & \textbf{N} & \textbf{Mean (s)} & \textbf{95\% CI (s)} & \textbf{Stdev (s)} & \textbf{Min (s)} & \textbf{Max (s)} \\
+\textbf{Tech.} & \textbf{Source} & \textbf{N} & \textbf{Mean (s)} & \textbf{95\% CI (s)} & \textbf{Stdev} & \textbf{Min} & \textbf{Max} \\
 \midrule
 T1059 & Tetragon eBPF & 20 & 27.96 & [27.88, 28.04] & 0.17 & 27.31 & 28.11 \\
 T1552 & K8s audit log & 20 & 0.19 & [0.18, 0.20] & 0.02 & 0.16 & 0.26 \\
 \bottomrule
 \end{tabular}
-\end{table*}
+\end{table}
 
 Audit-log-sourced detections (T1552) complete in a mean of 0.19
 seconds (95\% CI [0.18, 0.20], N=20), consistent with a detection path
@@ -1391,11 +1352,12 @@ every 3 seconds, and 300 seconds idle again, 241 total samples. Table~\ref{tab:o
 reports the phase summary and Fig.~\ref{fig:overhead} plots CPU and RSS across the
 full timeline directly.
 
-\begin{table*}[!t]
+\begin{table}[!t]
 \centering
 \caption{Resource Overhead by Phase (CAGE Server Process).}
 \label{tab:overhead}
 \tablebodyfont
+\setlength{\tabcolsep}{2.5pt}
 \begin{tabular}{@{}lccccc@{}}
 \toprule
 \textbf{Phase} & \textbf{N} & \textbf{Mean} & \textbf{95\% CI} & \textbf{Mean} & \textbf{95\% CI} \\
@@ -1406,23 +1368,21 @@ active & 121 & 3.2 & [3.16, 3.18] & 134.8 & [134.83, 134.85] \\
 idle\_post & 60 & 3.1 & [3.10, 3.10] & 134.9 & [134.90, 134.90] \\
 \bottomrule
 \end{tabular}
-\end{table*}
+\end{table}
 
 CPU usage stays within 3.1 to 3.2 percent across all three phases, with
 no visible spike when the active phase begins, consistent with the
-architecture described in \S\ref{sec:system-design}: each event does a
-fixed, small amount of work against a bounded per-identity window, so
-added event volume does not translate into a correspondingly larger
-per-event cost. Memory tells a similar story with one additional piece
-of evidence: RSS holds between 134.8 and 134.9 megabytes across the
-run, growing by roughly 0.1 megabytes over the full 20 minutes. A
-shorter pilot measurement had left open whether growth of this kind
-was a small, bounded constant term or the early part of a slow leak;
-this longer window, with five times the active duration and
-substantially more accumulated events, resolves that question in
-favor of bounded, consistent with the periodic stale-pod sweep in
-\texttt{CausalGraph} reclaiming tracking state as designed rather than
-memory accumulating unchecked.
+architecture in \S\ref{sec:system-design}: each event does a fixed,
+small amount of work against a bounded per-identity window, so added
+event volume does not translate into a larger per-event cost. Memory
+tells a similar story: RSS holds between 134.8 and 134.9 megabytes
+across the run, growing by roughly 0.1 megabytes over the full 20
+minutes. A shorter pilot measurement had left open whether growth of
+this kind was bounded or the early part of a slow leak; this longer
+window, with five times the active duration and substantially more
+accumulated events, resolves that in favor of bounded, consistent with
+the periodic stale-pod sweep in \texttt{CausalGraph} reclaiming tracking state
+as designed rather than memory accumulating unchecked.
 
 \begin{figure}[!t]
 \centering
@@ -1435,40 +1395,38 @@ step change when the active attack-load phase begins.}
 
 This measurement is scoped deliberately to the CAGE server process
 itself: it does not capture Tetragon's own per-node agent cost, since
-this \texttt{kind}-based cluster has no metrics-server installed and its
-tooling cannot isolate that cost separately, a scope limitation
-carried into \S\ref{sec:limitations} rather than implied silently. What
-this result does support is narrower and still useful: CAGE's own
-correlation layer, the part of the system this paper's architecture
-contribution is about, adds a small, flat cost that does not grow with
-attack activity.
+this \texttt{kind}-based cluster has no metrics-server installed to isolate
+that cost separately, a scope limitation carried into
+\S\ref{sec:limitations} rather than implied silently. What it does
+support is narrower and still useful: CAGE's own correlation layer,
+the part of the system this paper's architecture contribution is
+about, adds a small, flat cost that does not grow with attack
+activity.
 
 \subsection{RQ7: NetworkMonitor Polling Scalability (E6)}
 \label{subsec:rq7}
 
-Kubernetes clusters are elastic, and a monitoring component whose own
+Kubernetes clusters are elastic, and a monitoring component whose
 timing degrades as pod count grows can create a detection gap
 unrelated to any rule being wrong. RQ7 asks whether that happens to
-CAGE's network monitor, and the answer is tied directly to a real
-defect this project found and fixed during its own development, not a
-hypothetical concern.
+CAGE's network monitor, and the answer ties directly to a real defect
+this project found and fixed during its own development.
 
 The original \texttt{NetworkMonitor} design polled monitored pods
-sequentially, one \texttt{kubectl exec} call at a time, and this
+sequentially, one \texttt{kubectl exec} call at a time; this
 evaluation's own planning expected cycle time to grow roughly linearly
-with pod count, crossing the nominal 5-second target somewhere between
-5 and 10 pods. That expectation undersold the actual failure mode:
-with enough monitored pods, one full sequential sweep could take
-longer than the 10-second window the T1610 check uses to detect a scan
-burst, so a genuine multi-pod scan could be split across two sweeps
-and never accumulate enough distinct destinations in either single
-window to cross the detection threshold, a false negative produced
-entirely by the monitor's own polling cadence, discovered while
-debugging why a real T1610 burst was not firing rather than a
-limitation of the detection rule itself. The fix replaced sequential
-polling with a \texttt{ThreadPoolExecutor}-based concurrent sweep, so
-cycle time is bounded by the slowest single \texttt{kubectl exec} call
-rather than by their sum.
+with pod count, crossing the nominal 5-second target between 5 and 10
+pods. That expectation undersold the actual failure mode: with enough
+monitored pods, one full sequential sweep could take longer than the
+10-second window the T1610 check uses to detect a scan burst, so a
+genuine multi-pod scan could split across two sweeps and never
+accumulate enough distinct destinations in either window to cross the
+threshold, a false negative produced entirely by the monitor's own
+polling cadence, discovered while debugging why a real T1610 burst was
+not firing rather than a limitation of the detection rule itself. The
+fix replaced sequential polling with a \texttt{ThreadPoolExecutor}-based
+concurrent sweep, bounding cycle time by the slowest single \texttt{kubectl
+exec} call rather than their sum.
 
 Table~\ref{tab:scalability} reports the full-scale measurement of that fix: N in
 \{1, 2, 4, 8, 16\} scan-target pods, corresponding to 3 to 18 total
@@ -1499,12 +1457,11 @@ every N overlap heavily, all falling roughly within 3.6 to 6.1 seconds.
 Two of the five N values have a mean just above the nominal 5-second
 target, but given how much the intervals overlap, this reads as noise
 around a flat cycle time rather than a genuine upward trend with pod
-count, a meaningfully different claim than the one originally
-anticipated: rather than characterizing where a scalability limitation
-appears, as this evaluation was originally planned to do, this result
-is direct evidence that the concurrency fix removed the growth trend
-the sequential design would have produced, holding cycle time flat
-across an order-of-magnitude range in monitored-pod count.
+count, a meaningfully different claim than originally anticipated:
+rather than characterizing where a scalability limitation appears,
+this result is direct evidence the concurrency fix removed the growth
+trend the sequential design would have produced, holding cycle time
+flat across an order-of-magnitude range in monitored-pod count.
 
 \subsection{RQ4: Evasion Boundary Characterization (E9)}
 \label{subsec:rq4}
@@ -1559,36 +1516,33 @@ threshold.}
 \end{figure}
 
 The sharpness of this transition, a deterministic 0/10 on one side and
-a deterministic 10/10 on the other, with no intermediate or
-probabilistic behavior in between, is itself a meaningful observation
-rather than an expected formality: it confirms that these three rules
-are exactly what \S\ref{sec:system-design} describes them as, fixed
+10/10 on the other with no intermediate behavior, confirms that these
+three rules are exactly what \S\ref{sec:system-design} describes: fixed
 numeric comparisons against a disclosed threshold, not statistical or
-learned decision boundaries that would show some rate of ambiguous
-outcomes near the edge. This is the direct empirical counterpart to
-the trade-off argued architecturally in \S\ref{sec:system-design}:
-CAGE's bounded-window, rule-based approach cannot generalize beyond
-its explicit rule set, but in exchange produces alerts that trace to
-one named rule and one disclosed threshold rather than a boundary that
-depends on training data, the trade-off RQ4 makes concrete instead of
+learned decision boundaries that would show ambiguous outcomes near
+the edge. This is the direct empirical counterpart to the trade-off
+argued architecturally in \S\ref{sec:system-design}: CAGE's
+bounded-window, rule-based approach cannot generalize beyond its
+explicit rule set, but in exchange produces alerts that trace to one
+named rule and one disclosed threshold rather than a boundary that
+depends on training data, a trade-off RQ4 makes concrete instead of
 asserted.
 
 We report this as a measured, disclosed property of a threshold-based
 detector (\S\ref{sec:threat-model}) rather than a weakness discovered
-post hoc; the threat model explicitly scopes this boundary as known
-and deliberately characterized, and this experiment is that
-characterization. The practical implication for deployment is
-narrower than it might first appear: this experiment establishes that
-the boundary is exactly where the documented threshold says it is, not
-what happens to detection and false-positive rates at any other
-threshold value. Lowering a threshold to catch a more cautious
-attacker is the only lever available for these three rules, and it
-trades directly against false positives on legitimate bursty behavior
-of the same shape, a burst of routine connections, executions, or RBAC
-reads. Characterizing that trade-off across the full range of
-threshold values, rather than only at the default and its immediate
-boundary, is the threshold-sweep experiment descoped for time in this
-evaluation cycle (\S\ref{sec:limitations}) and remains open work.
+post hoc; the threat model already scopes this boundary as known and
+deliberately characterized, and this experiment is that
+characterization. The practical implication is narrower than it might
+first appear: it establishes where the boundary sits, not what happens
+to detection and false-positive rates at any other threshold value.
+Lowering a threshold to catch a more cautious attacker is the only
+lever available for these three rules, trading directly against false
+positives on legitimate bursty behavior of the same shape, a burst of
+routine connections, executions, or RBAC reads. Characterizing that
+trade-off across the full range of threshold values, rather than only
+at the default and its immediate boundary, is the threshold-sweep
+experiment descoped for time in this evaluation cycle
+(\S\ref{sec:limitations}) and remains open work.
 
 \subsection{RQ8: Fault Injection and Recovery (E8)}
 \label{subsec:rq8}
@@ -1635,27 +1589,25 @@ control-plane-outage & 5 & 5/5 (100\%) & [0.57, 1.00] & 0 \\
 \end{table}
 
 All 15 injected faults recovered functionally, meaning a real
-post-fault attack was fired and correctly detected, without any manual
+post-fault attack was fired and correctly detected, without manual
 intervention: 5 out of 5 for every scenario, Wilson 95\% CI [0.57, 1.00]
 in each case. That interval's lower bound sits well below 1.0 despite
-every trial succeeding, worth stating plainly rather than letting the
-headline number stand alone: at a sample size of 5, a perfect result
-is still compatible with a true recovery rate as low as 0.57, and
+every trial succeeding: at a sample size of 5, a perfect result is
+still compatible with a true recovery rate as low as 0.57, so
 reporting the interval alongside the point estimate keeps that
-uncertainty visible instead of implying a stronger guarantee than five
-trials can support. Mean functional-recovery time was 13.3 seconds for
-the Tetragon-kill scenario, 226.0 seconds for the audit-log truncation,
-and 250.3 seconds for the control-plane outage, the same ordering a
-smaller pilot run had found earlier (34.9, 241.9, and 303.8 seconds
+uncertainty visible rather than implying a stronger guarantee than
+five trials can support. Mean functional-recovery time was 13.3
+seconds for the Tetragon-kill scenario, 226.0 for the audit-log
+truncation, and 250.3 for the control-plane outage, the same ordering
+a smaller pilot run found earlier (34.9, 241.9, and 303.8 seconds
 respectively), with the full-scale means somewhat faster, plausibly
-because the pilot's single control-plane trial happened to catch extra
-apiserver warmup variance that averages out across five repetitions.
-None of the recovery mechanisms exercised here, the Tetragon consumer's
+because the pilot's single control-plane trial caught extra apiserver
+warmup variance that averages out across five repetitions. None of
+the recovery mechanisms exercised here, the Tetragon consumer's
 reconnect loop, the pod UID cache's exponential backoff, \texttt{tail
 -F --retry}'s own truncation handling, were written for this
-experiment; all three are pre-existing production code, and this
-result tests that code under real failure, not a demonstration of
-logic added to pass it.
+experiment; all three are pre-existing production code tested here
+under real failure, not logic added to pass it.
 
 \begin{figure}[!t]
 \centering
@@ -1669,32 +1621,33 @@ functional recovery.}
 
 Spurious alerts during the fault windows were uneven across scenarios:
 4 total across the 5 Tetragon-kill windows, 12 across the 5 audit-log
-truncation windows, and none at all across the 5 control-plane windows.
-This pattern tracks window duration rather than suggesting fault-induced
-false positives. The attacker pod's own background loop fires a
-legitimate T1059 roughly every 30 seconds regardless of any fault being
+truncation windows, and none across the 5 control-plane windows. This
+pattern tracks window duration rather than suggesting fault-induced
+false positives: the attacker pod's own background loop fires a
+legitimate T1059 roughly every 30 seconds regardless of any fault
 tested, and the audit-truncate and control-plane scenarios both have
-functional-recovery windows lasting several minutes, giving that
-background loop more opportunities to land inside the window than the
-short Tetragon-kill scenario does. This evaluation did not isolate that
-background activity with a dedicated no-traffic control run, which would
-be needed to rule out fault-induced false positives with certainty
-rather than by inference from timing; that gap is carried into \S\ref{sec:limitations} as a specific, named limitation.
+functional-recovery windows lasting several minutes, giving that loop
+more opportunities to land inside the window than the short
+Tetragon-kill scenario. This evaluation did not isolate that
+background activity with a dedicated no-traffic control run, needed to
+rule out fault-induced false positives with certainty rather than by
+inference from timing; that gap is carried into \S\ref{sec:limitations}
+as a named limitation.
 
 A secondary result concerns the \texttt{/api/health} staleness flag
 rather than the faults themselves. For two of the three scenarios,
 health-recovery could not be read directly off that flag, since it
-only clears when a new event actually arrives, and no incidental
-traffic occurred between fault resolution and the deliberate recovery
-attack. This is precisely why functional recovery, firing a real
-attack and confirming it is detected, is the primary claim of this
-experiment rather than the health flag's own state: a flag that
-updates only on new traffic cannot, by construction, prove recovery
-before something generates that traffic. It also validates a specific
-design choice from \S\ref{sec:system-design}, that health observability
-is kept separate from the detection path itself; had the two been
-coupled, this experiment would have had no independent way to
-distinguish an infrastructure problem from a detection problem.
+only clears when a new event arrives and no incidental traffic
+occurred between fault resolution and the deliberate recovery attack.
+This is precisely why functional recovery, firing a real attack and
+confirming detection, is this experiment's primary claim rather than
+the health flag's own state: a flag updating only on new traffic
+cannot, by construction, prove recovery before something generates
+that traffic. It also validates a specific design choice from
+\S\ref{sec:system-design}, keeping health observability separate from
+the detection path; had the two been coupled, this experiment would
+have had no independent way to distinguish an infrastructure problem
+from a detection problem.
 
 \section{Lessons from Live-System Evaluation}
 \label{sec:lessons}
@@ -1817,34 +1770,26 @@ The plateau itself is a solid, repeatable finding; the causal
 explanation for why it exists at exactly that duration is not.
 
 Whether this same delay depends on connection age remains genuinely
-unresolved: two connection-age sweeps at different scales produced
-contradictory results, and the more likely explanation, a post-restart
-event backlog contaminating the full-scale sweep's early trials, is
-supported by log evidence but not confirmed as the sole cause. Neither
-the original age-dependence hypothesis nor its later revision is
-treated as settled, and a reader relying on this paper to reason about
-Tetragon's own internals, rather than CAGE's behavior, should not
-treat either as established.
+unresolved, as \S\ref{subsec:rq5} details: the two connection-age
+sweeps produced contradictory results, and neither the original
+age-dependence hypothesis nor its later revision is treated as
+settled. A reader relying on this paper to reason about Tetragon's own
+internals, rather than CAGE's behavior, should not treat either as
+established.
 
-The T1499 evasion-boundary result (\S\ref{subsec:rq4}) uses a deliberately wider
-sub-threshold margin than the other two threshold-based detectors,
-because live measurement of the attack-firing helper's own
-per-invocation process count proved unreliable across repeated trials;
-the boundary is real and honestly characterized, but a
-comfortably-under-threshold point rather than an exact
-threshold-minus-one measurement, unlike T1610 and T1613.
+The T1499 evasion-boundary result (\S\ref{subsec:rq4}) uses a
+deliberately wider sub-threshold margin than T1610 and T1613, for the
+reason detailed there: the boundary is real and honestly
+characterized, but a comfortably-under-threshold point rather than an
+exact threshold-minus-one measurement.
 
-The spurious-alert pattern observed during fault injection (\S\ref{subsec:rq8}) has
-the same structure as the connection-age question above: a plausible
-explanation supported by circumstantial evidence, not a confirmed
-cause. The attacker pod's background loop firing roughly every 30
-seconds, combined with the audit-truncate and control-plane scenarios'
-longer functional-recovery windows, is consistent with why those two
-scenarios saw more spurious alerts than the shorter Tetragon-kill
-scenario, but this evaluation did not isolate that background activity
-with a dedicated no-traffic control run, so fault-induced false
-positives cannot be ruled out with the same certainty the timing
-correlation suggests.
+The spurious-alert pattern observed during fault injection
+(\S\ref{subsec:rq8}) has the same structure as the connection-age
+question above: a plausible explanation, tied to background attacker
+traffic and each scenario's recovery-window length, supported by
+circumstantial timing evidence rather than a dedicated no-traffic
+control run, so fault-induced false positives cannot be ruled out with
+full certainty.
 
 \subsection{External Validity}
 \label{subsec:external-validity}
@@ -1904,15 +1849,13 @@ cluster would see; a cluster with substantially more or less routine
 exec activity than our benign control would observe a different
 precision number without any change to CAGE's own logic.
 
-Detection-quality experiments use N=10 trials per condition, which
-narrows the 95 percent Wilson confidence interval to a floor of 72.2
-percent even where every trial succeeded, a resource-bounded choice,
-not an arbitrary one: each trial waits up to the full detection-window
-timeout to confirm a non-detection, and this cost multiplies across
-eleven techniques and two conditions into several hours of supervised
-session time at N=10 alone. We report confidence intervals throughout
-specifically so this constraint stays visible to the reader rather
-than hidden behind point estimates.
+Detection-quality experiments use N=10 trials per condition
+(\S\ref{sec:eval-methodology}), a resource-bounded choice rather than
+an arbitrary one, which narrows the 95 percent Wilson confidence
+interval to a floor of 72.2 percent even where every trial succeeded.
+We report confidence intervals throughout specifically so this
+constraint stays visible to the reader rather than hidden behind point
+estimates.
 
 \subsection{Reliability and Reproducibility}
 \label{subsec:reliability}
@@ -1922,20 +1865,20 @@ descoped for time: a direct old-code-versus-new-code comparison
 isolating the chain-correlation dedup fix, and a full multi-value
 threshold sweep rather than only a default-versus-boundary comparison.
 Neither affects the validity of the results reported; both would add
-depth to \S\ref{subsec:rq3} and \S\ref{subsec:rq4} respectively and are
-concrete, well-scoped future work rather than open-ended suggestions.
+depth to \S\ref{subsec:rq3} and \S\ref{subsec:rq4} as concrete,
+well-scoped future work.
 
-The evaluation infrastructure itself was not free of defects. \S\ref{sec:lessons}
-documents several real bugs found only by running this evaluation
-against live infrastructure: a metrics-matching window that could have
-misattributed false positives, a string-matching pattern that could
-have masked real detections, and process-identification bugs that
-corrupted two full-scale systems measurements before being caught and
-fixed. We report this directly, rather than treating it as an
-embarrassment to minimize, because it is a property of the evaluation
-environment anyone extending this work should know about, and because
-catching and correcting it is itself part of what this paper's
-methodology demonstrates.
+The evaluation infrastructure itself was not free of defects:
+\S\ref{sec:lessons} documents several real bugs found only by running
+this evaluation against live infrastructure, a metrics-matching window
+that could have misattributed false positives, a string-matching
+pattern that could have masked real detections, and
+process-identification bugs that corrupted two full-scale systems
+measurements before being caught and fixed. We report this directly,
+rather than as an embarrassment to minimize, because it is a property
+of the evaluation environment anyone extending this work should know
+about, and because catching and correcting it is itself part of what
+this paper's methodology demonstrates.
 
 Finally, CAGE's own runtime credentials in this evaluation are broader
 than its architecture requires: as \S\ref{sec:threat-model} discloses, CAGE
@@ -2004,37 +1947,25 @@ against the same infrastructure, rather than treating accuracy and
 deployability as separate studies, is what lets this paper make a
 claim neither half could support alone.
 
-One further finding sits outside any single research question. Two
-people evaluated two different parts of this same codebase, one
-testing detection logic and one testing systems behavior, and each
-found real defects that static analysis had missed and that the other
-evaluator never encountered: a deduplication flag that could fire only
-once in a pod's lifetime, a metrics script that would have silently
-misattributed false positives, a health flag whose passive updates
-cannot prove what they appear to prove. None of these were
-adversarial; all of them were found by running the system and watching
-it behave unexpectedly. That pattern is not specific to CAGE: any
-system whose correctness depends on cross-process state and the
-relative timing of events from more than one source carries the same
-risk, and this paper's experience argues that such systems need to be
-evaluated by executing them against live infrastructure, not only
-reasoned about from their source.
+One further finding sits outside any single research question: as
+\S\ref{sec:lessons} details, two people evaluating two different halves
+of this same codebase each surfaced real defects that static analysis
+had missed and that the other evaluator never encountered, none of
+them adversarial, all found only once the system ran against live
+infrastructure. That pattern is not specific to CAGE: any system whose
+correctness depends on cross-process state and multi-source event
+timing carries the same risk, and this paper's experience argues that
+such systems need to be evaluated the same way.
 
-This evaluation also has real limits on what it can claim. Every
-number reported here comes from a single control-plane, two-worker
-cluster running inside a virtual machine on one host; the relative
-pattern between audit-log and eBPF-sourced detection latency is the
-more robust claim to generalize from, and the absolute 28-second
-plateau specifically may not hold unchanged on bare metal or across a
-larger, multi-node deployment. Every attack used to produce the
-detection-quality results was fixed, disclosed, and run exactly as
-written, describing CAGE's behavior against that specific attack set
-rather than its robustness against an adversary deliberately probing
-for a way around it, beyond the one threshold boundary this work
-already measures directly. The comparison against related systems in
-Table~\ref{tab:related-work} is built from each system's own published
-description rather than a controlled measurement against the same
-attack set in the same cluster.
+This evaluation also has real limits on what it can claim, detailed
+fully in \S\ref{sec:limitations}: every number here comes from a
+single-host, two-worker cluster, so the relative audit-log-versus-eBPF
+latency gap is the more robust claim to generalize from than the
+absolute 28-second plateau; every attack was fixed and disclosed
+rather than adversarially adaptive, beyond the one threshold boundary
+measured directly in \S\ref{subsec:rq4}; and the comparison against
+related systems in Table~\ref{tab:related-work} remains qualitative
+rather than a controlled, same-cluster measurement.
 
 Three directions follow from what this implementation already puts in
 place, rather than from a wish list assembled after the fact. The
@@ -2078,7 +2009,6 @@ itself does.
 \bibitem{ref3} M. Franzil, V. Armani, L. A. Dias Knob, and D. Siracusa, ``Sharpening
 Kubernetes audit logs with context awareness,'' \emph{Computer Networks}, vol.
 276, art. no. 111890, Feb. 2026, doi: 10.1016/j.comnet.2025.111890.
-Also available: arXiv:2506.16328.
 
 \bibitem{ref4} M. Abbas, S. Khan, A. Monum, F. Zaffar, R. Tahir, D. Eyers, H.
 Irshad, A. Gehani, V. Yegneswaran, and T. Pasquier, ``PACED:
@@ -2089,7 +2019,7 @@ pp. 261--272.
 \bibitem{ref5} X. Han, T. Pasquier, A. Bates, J. Mickens, and M. Seltzer, ``UNICORN:
 Runtime provenance-based detector for advanced persistent threats,'' in
 \emph{Proc. Network and Distributed System Security Symp. (NDSS)}, San Diego,
-CA, USA, Feb. 2020. Also available: arXiv:2001.01525.
+CA, USA, Feb. 2020.
 
 \bibitem{ref6} Red Hat, ``The state of Kubernetes security report: 2024 edition,''
 Red Hat, Inc., 2024. [Online]. Available: \url{https://www.redhat.com/en/engage/state-kubernetes-security-report-2024}
@@ -2100,8 +2030,7 @@ Red Hat, Inc., 2024. [Online]. Available: \url{https://www.redhat.com/en/engage/
 \bibitem{ref8} O. Bajaber, B. Ji, and P. Gao, ``P4Control: Line-rate cross-host
 attack prevention via in-network information flow control enabled by
 programmable switches and eBPF,'' in \emph{Proc. 2024 IEEE Symp. Security and
-Privacy (S\&P)}, San Francisco, CA, USA, May 2024. Also available:
-arXiv:2405.14970.
+Privacy (S\&P)}, San Francisco, CA, USA, May 2024.
 
 \bibitem{ref9} MITRE Corporation, ``MITRE ATT\&CK.'' [Online]. Available:
 \url{https://attack.mitre.org/}. Accessed: Jul. 27, 2026.
@@ -2118,14 +2047,12 @@ environments,'' arXiv preprint arXiv:2511.18155, 2025.
 \bibitem{ref12} Z. Cheng, Q. Lv, J. Liang, Y. Wang, D. Sun, T. Pasquier, and X.
 Han, ``KAIROS: Practical intrusion detection and investigation using
 whole-system provenance,'' in \emph{Proc. 2024 IEEE Symp. Security and
-Privacy (S\&P)}, San Francisco, CA, USA, May 2024, pp. 3533--3551. Also
-available: arXiv:2308.05034.
+Privacy (S\&P)}, San Francisco, CA, USA, May 2024, pp. 3533--3551.
 
 \bibitem{ref13} F. Wilkens, F. Ortmann, S. Haas, M. Vallentin, and M. Fischer,
 ``Multi-stage attack detection via kill chain state machines,'' in \emph{Proc.
 3rd Workshop on Cyber-Security Arms Race (CYSARM '21)}, Virtual Event,
-Republic of Korea, Nov. 2021, pp. 13--24. Also available:
-arXiv:2103.14628.
+Republic of Korea, Nov. 2021, pp. 13--24.
 
 \bibitem{ref14} E. B. Wilson, ``Probable inference, the law of succession, and
 statistical inference,'' \emph{J. Amer. Statist. Assoc.}, vol. 22, no. 158,
@@ -2169,27 +2096,28 @@ runs, and pilot-scale files are kept alongside the full-scale ones
 (\url{evaluation/person_b/data/*_pilot_*.csv},
 \url{evaluation/person_a/output_pilot_N2-3/}) for direct comparison.
 
-\begin{table*}[!t]
+\begin{table}[!t]
 \centering
 \caption{Raw CSV Files and What They Back.}
 \label{tab:artifacts}
 \tablebodyfont
-\begin{tabular}{@{}llll@{}}
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.40\columnwidth}c>{\raggedright\arraybackslash}p{0.42\columnwidth}@{}}
 \toprule
-\textbf{File} & \textbf{Rows} & \textbf{Backs} & \textbf{Directory} \\
+\textbf{File} & \textbf{Rows} & \textbf{Backs} \\
 \midrule
-\texttt{results\_detection\_accuracy.csv} & 180 & Table~\ref{tab:per-technique}, Fig.~\ref{fig:precision-recall} (\S\ref{subsec:rq1}) & \texttt{person\_a/output/} \\
-\texttt{results\_ablation\_full.csv} & 330 & Table~\ref{tab:ablation}, Figs.~\ref{fig:ablation-heatmap}--\ref{fig:tactic-radar} (\S\ref{subsec:rq2}) & \texttt{person\_a/output/} \\
-\texttt{results\_chain\_dedup.csv} & 50 & Table~\ref{tab:chain-dedup}, Fig.~\ref{fig:chain-dedup} (\S\ref{subsec:rq3}) & \texttt{person\_a/output/} \\
-\texttt{results\_latency.csv} & 40 & Table~\ref{tab:latency}, Fig.~\ref{fig:latency-cdf} (\S\ref{subsec:rq5}) & \texttt{person\_b/data/} \\
-\texttt{results\_latency\_by\_connage.csv} & 5 & Fig.~\ref{fig:latency-connage} (\S\ref{subsec:rq5}) & \texttt{person\_b/data/} \\
-\texttt{results\_overhead.csv} & 242 & Table~\ref{tab:overhead}, Fig.~\ref{fig:overhead} (\S\ref{subsec:rq6}) & \texttt{person\_b/data/} \\
-\texttt{results\_scalability.csv} & 45 & Table~\ref{tab:scalability} (\S\ref{subsec:rq7}) & \texttt{person\_b/data/} \\
-\texttt{results\_parameter\_sensitivity.csv} & 60 & Table~\ref{tab:evasion}, Fig.~\ref{fig:evasion-boundary} (\S\ref{subsec:rq4}) & \texttt{person\_a/output/} \\
-\texttt{results\_fault\_recovery.csv} & 15 & Table~\ref{tab:fault-recovery}, Fig.~\ref{fig:fault-timeline} (\S\ref{subsec:rq8}) & \texttt{person\_b/data/} \\
+\url{results_detection_accuracy.csv} & 180 & Table~\ref{tab:per-technique}, Fig.~\ref{fig:precision-recall} (\S\ref{subsec:rq1}) \\
+\url{results_ablation_full.csv} & 330 & Table~\ref{tab:ablation}, Figs.~\ref{fig:ablation-heatmap}--\ref{fig:tactic-radar} (\S\ref{subsec:rq2}) \\
+\url{results_chain_dedup.csv} & 50 & Table~\ref{tab:chain-dedup}, Fig.~\ref{fig:chain-dedup} (\S\ref{subsec:rq3}) \\
+\url{results_latency.csv} & 40 & Table~\ref{tab:latency}, Fig.~\ref{fig:latency-cdf} (\S\ref{subsec:rq5}) \\
+\url{results_latency_by_connage.csv} & 5 & Fig.~\ref{fig:latency-connage} (\S\ref{subsec:rq5}) \\
+\url{results_overhead.csv} & 242 & Table~\ref{tab:overhead}, Fig.~\ref{fig:overhead} (\S\ref{subsec:rq6}) \\
+\url{results_scalability.csv} & 45 & Table~\ref{tab:scalability} (\S\ref{subsec:rq7}) \\
+\url{results_parameter_sensitivity.csv} & 60 & Table~\ref{tab:evasion}, Fig.~\ref{fig:evasion-boundary} (\S\ref{subsec:rq4}) \\
+\url{results_fault_recovery.csv} & 15 & Table~\ref{tab:fault-recovery}, Fig.~\ref{fig:fault-timeline} (\S\ref{subsec:rq8}) \\
 \bottomrule
 \end{tabular}
-\end{table*}
+\end{table}
 
 Directory paths are relative to \url{evaluation/}. Detection-quality files
 (owned by the experiments in \S\ref{subsec:rq1}, \S\ref{subsec:rq2}, \S\ref{subsec:rq3}, and \S\ref{subsec:rq4}) live under
@@ -2197,22 +2125,20 @@ Directory paths are relative to \url{evaluation/}. Detection-quality files
 and \S\ref{subsec:rq8}) live under \url{person_b/data/}.
 
 \textbf{Figure and table generation.} Each figure is produced by a
-dedicated, single-purpose script that reads the corresponding CSV
+dedicated, single-purpose script reading the corresponding CSV
 directly, so no figure depends on manually transcribed numbers.
-Detection-quality figures (Figs.~\ref{fig:precision-recall}--\ref{fig:tactic-radar}, \ref{fig:chain-dedup}, \ref{fig:evasion-boundary}) are generated by the
+Detection-quality figures (Figs.~\ref{fig:precision-recall}--\ref{fig:tactic-radar}, \ref{fig:chain-dedup}, \ref{fig:evasion-boundary}) are generated by
 scripts under \url{evaluation/person_a/plots/}; systems-characteristics
-figures (Figs.~\ref{fig:latency-cdf}--\ref{fig:overhead}, \ref{fig:fault-timeline}) are generated by the scripts under
+figures (Figs.~\ref{fig:latency-cdf}--\ref{fig:overhead}, \ref{fig:fault-timeline}) by scripts under
 \url{evaluation/person_b/plotting/}, which also includes \texttt{build\_tables.py}
-for that half's result tables. Figs.~\ref{fig:visibility-gap}--\ref{fig:detection-pipeline} are the exception: none is
-data-driven, so all four live under \url{evaluation/figures/}. Figs.~\ref{fig:visibility-gap}
-and~\ref{fig:detection-pipeline} are generated from Python scripts in that directory
-(\texttt{plot\_fig1\_visibility\_gap.py}, \texttt{plot\_fig4\_detection\_pipeline.py});
-Figs.~\ref{fig:architecture} and~\ref{fig:uid-resolution} are hand-authored SVG diagrams, refined directly rather
-than script-generated, with source \texttt{.svg} alongside the rendered
-\texttt{.pdf} and \texttt{.png}.
-All plotting scripts share a common style module
-(\url{evaluation/person_a/plots/style.py}) so that font, color palette,
-and figure sizing are consistent across every figure in this paper.
+for that half's result tables. Figs.~\ref{fig:visibility-gap} and~\ref{fig:detection-pipeline} are the
+exception, not data-driven, generated from Python scripts under
+\url{evaluation/figures/} (\texttt{plot\_fig1\_visibility\_gap.py},
+\texttt{plot\_fig4\_detection\_pipeline.py}); Figs.~\ref{fig:architecture}
+and~\ref{fig:uid-resolution} are hand-authored SVG diagrams, with source
+\texttt{.svg} alongside the rendered \texttt{.pdf} and \texttt{.png}. All plotting scripts
+share a common style module (\url{evaluation/person_a/plots/style.py})
+for consistent font, color, and sizing.
 
 \textbf{Reproduction.} Rebuilding the environment, running an experiment,
 and regenerating its figure or table is a three-step process
